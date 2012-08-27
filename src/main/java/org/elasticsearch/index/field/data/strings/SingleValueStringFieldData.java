@@ -23,6 +23,8 @@ import org.elasticsearch.common.RamUsage;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.util.concurrent.ThreadLocals;
 
+import java.util.Arrays;
+
 /**
  *
  */
@@ -82,7 +84,11 @@ public class SingleValueStringFieldData extends StringFieldData {
     public String value(int docId) {
         return values[ordinals[docId]];
     }
-
+    
+     @Override public int ordinal(int docId) {
+         return ordinals()[docId];
+     }
+ 
     @Override
     public String[] values(int docId) {
         int loc = ordinals[docId];

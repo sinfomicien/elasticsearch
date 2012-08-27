@@ -258,6 +258,8 @@ public class TermsFacetBuilder extends AbstractFacetBuilder {
         }
 
         builder.endObject();
+        builder.field("grouped", grouped);
+        builder.field("truncate", truncate);
 
         addFilterFacetAndGlobal(builder, params);
 

@@ -167,7 +167,14 @@ public class TransportCountAction extends TransportBroadcastOperationAction<Coun
             }
             context.preProcess();
             try {
-                long count = Lucene.count(context.searcher(), context.query());
+                //long count = Lucene.count(context.searcher(), context.query());
+                long count;
+                if (request.grouped()) {
+                    count = Lucene.groupedCount(context.searcher(), request.getGroupField(), context.query(), request.minScore()
+                    );
+                } else {
+                	count = Lucene.count(context.searcher(), context.query());
+                }
                 return new ShardCountResponse(request.index(), request.shardId(), count);
             } catch (Exception e) {
                 throw new QueryPhaseExecutionException(context, "failed to execute count", e);

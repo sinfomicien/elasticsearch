@@ -22,6 +22,7 @@ package org.elasticsearch.search.facet;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.index.query.FilterBuilder;
+import org.elasticsearch.search.facet.histogram.HistogramFacetBuilder;
 import org.elasticsearch.search.internal.ContextIndexSearcher;
 
 import java.io.IOException;
@@ -38,6 +39,10 @@ public abstract class AbstractFacetBuilder implements ToXContent {
     protected FilterBuilder facetFilter;
 
     protected String nested;
+
+    protected boolean grouped;
+
+    protected boolean truncate;
 
     protected AbstractFacetBuilder(String name) {
         this.name = name;
@@ -72,6 +77,18 @@ public abstract class AbstractFacetBuilder implements ToXContent {
         this.scope = scope;
         return this;
     }
+    
+    public AbstractFacetBuilder grouped(boolean grouped) {
+        this.grouped = grouped;
+        return this;
+    }
+
+    public AbstractFacetBuilder truncate(boolean truncate) {
+        this.truncate = truncate;
+        return this;
+    }
+    
+
 
     protected void addFilterFacetAndGlobal(XContentBuilder builder, Params params) throws IOException {
         if (facetFilter != null) {

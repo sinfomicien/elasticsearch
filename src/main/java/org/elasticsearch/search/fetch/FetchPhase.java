@@ -65,6 +65,7 @@ import java.util.Map;
  */
 public class FetchPhase implements SearchPhase {
 
+	private static final String GROUPED_FIELD = "###grouped###";
     private final FetchSubPhase[] fetchSubPhases;
 
     @Inject
@@ -169,7 +170,8 @@ public class FetchPhase implements SearchPhase {
 
             // get the version
 
-            InternalSearchHit searchHit = new InternalSearchHit(docId, uid.id(), uid.type(), sourceRequested ? source : null, null);
+            boolean grouped = context.queryResult().documentGrouped().contains(docId);
+            InternalSearchHit searchHit = new InternalSearchHit(docId, uid.id(), uid.type(), source, null, grouped);
             hits[index] = searchHit;
 
             for (Object oField : doc.getFields()) {
@@ -259,6 +261,20 @@ public class FetchPhase implements SearchPhase {
         }
 
         context.fetchResult().hits(new InternalSearchHits(hits, context.queryResult().topDocs().totalHits, context.queryResult().topDocs().getMaxScore()));
+    }
+
+    private void addGroupInformation(SearchContext context, int docId, InternalSearchHit searchHit) {
+        if (searchHit.fieldsOrNull() == null) {
+            searchHit.fields(new HashMap<String, SearchHitField>(2));
+        }
+        SearchHitField hitField = searchHit.fields().get(GROUPED_FIELD);
+        if (hitField == null) {
+            hitField = new InternalSearchHitField(GROUPED_FIELD, new ArrayList<Object>(2));
+            searchHit.fields().put(GROUPED_FIELD, hitField);
+        }
+
+        boolean grouped = context.queryResult().documentGrouped().contains(docId);
+        hitField.values().add(grouped);
     }
 
     private byte[] extractSource(Document doc, DocumentMapper documentMapper) {

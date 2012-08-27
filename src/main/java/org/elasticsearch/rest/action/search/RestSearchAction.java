@@ -185,6 +185,10 @@ public class RestSearchAction extends BaseRestHandler {
             }
             searchSourceBuilder.size(size);
         }
+        String groupField = request.param("group_field");
+        if (groupField != null) {
+            searchSourceBuilder.groupField(groupField);
+        }
 
         if (request.hasParam("explain")) {
             if (searchSourceBuilder == null) {

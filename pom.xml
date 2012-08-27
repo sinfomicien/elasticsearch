@@ -78,6 +78,12 @@
             <artifactId>lucene-highlighter</artifactId>
             <version>${lucene.version}</version>
             <scope>compile</scope>
+       </dependency>
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-grouping</artifactId>
+            <version>${lucene.version}</version>
+            <scope>compile</scope>
         </dependency>
 
         <!-- START: dependencies that are shaded -->
@@ -451,20 +457,6 @@
                 </executions>
             </plugin>
             <plugin>
-                <artifactId>maven-dependency-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <phase>prepare-package</phase>
-                        <goals>
-                            <goal>copy-dependencies</goal>
-                        </goals>
-                        <configuration>
-                            <outputDirectory>${project.build.directory}/lib</outputDirectory>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
                 <!-- some infos https://github.com/tcurdt/jdeb/blob/master/docs/maven.md
                 -->
                 <artifactId>jdeb</artifactId>
@@ -579,5 +571,23 @@
                 </executions>
             </plugin>
         </plugins>
+        <pluginManagement>
+          <plugins>
+            <plugin>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/lib</outputDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+          </plugins>
+        </pluginManagement>
     </build>
 </project>

@@ -107,6 +107,7 @@ public class SearchSourceBuilder implements ToXContent {
 
     private String[] stats;
 
+    private String groupField;
 
     /**
      * Constructs a new search source builder.
@@ -417,6 +418,11 @@ public class SearchSourceBuilder implements ToXContent {
         return this;
     }
 
+    public SearchSourceBuilder groupField(String groupField) {
+        this.groupField = groupField;
+        return this;
+    }
+
     /**
      * Adds the fields to load and return as part of the search request. If none are specified,
      * the source of the document will be returned.
@@ -647,6 +653,10 @@ public class SearchSourceBuilder implements ToXContent {
                 builder.endObject();
             }
             builder.endObject();
+        }
+
+        if (groupField != null) {
+            builder.field("groupField", groupField);
         }
 
         if (scriptFields != null) {

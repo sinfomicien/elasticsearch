@@ -64,6 +64,8 @@ public class CountRequest extends BroadcastOperationRequest {
     protected String queryHint;
     @Nullable
     protected String routing;
+    
+    private String groupField = "";
 
     private BytesReference querySource;
     private boolean querySourceUnsafe;
@@ -221,6 +223,15 @@ public class CountRequest extends BroadcastOperationRequest {
         return this;
     }
 
+    public CountRequest groupField(String groupField) {
+        this.groupField = groupField;
+        return this;
+    }
+
+    public String groupField() {
+        return groupField;
+    }
+
     /**
      * The types of documents the query will run against. Defaults to all types.
      */
@@ -263,7 +274,8 @@ public class CountRequest extends BroadcastOperationRequest {
     public void readFrom(StreamInput in) throws IOException {
         super.readFrom(in);
         minScore = in.readFloat();
-
+        groupField = in.readUTF();
+        
         if (in.readBoolean()) {
             queryHint = in.readUTF();
         }
@@ -287,6 +299,7 @@ public class CountRequest extends BroadcastOperationRequest {
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
         out.writeFloat(minScore);
+        out.writeUTF(groupField);
 
         if (queryHint == null) {
             out.writeBoolean(false);

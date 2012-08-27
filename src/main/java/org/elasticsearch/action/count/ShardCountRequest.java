@@ -43,6 +43,8 @@ class ShardCountRequest extends BroadcastShardOperationRequest {
 
     @Nullable
     private String[] filteringAliases;
+    
+    private String groupField;
 
     ShardCountRequest() {
 
@@ -54,6 +56,7 @@ class ShardCountRequest extends BroadcastShardOperationRequest {
         this.querySource = request.querySource();
         this.types = request.types();
         this.filteringAliases = filteringAliases;
+        this.groupField = request.groupField();
     }
 
     public float minScore() {
@@ -72,10 +75,19 @@ class ShardCountRequest extends BroadcastShardOperationRequest {
         return filteringAliases;
     }
 
+    public boolean grouped() {
+        return groupField != null && groupField.trim().length() > 0;
+    }
+
+    public String getGroupField() {
+        return groupField;
+    }
+
     @Override
     public void readFrom(StreamInput in) throws IOException {
         super.readFrom(in);
         minScore = in.readFloat();
+        groupField = in.readUTF();
 
         querySource = in.readBytesReference();
 
@@ -99,6 +111,7 @@ class ShardCountRequest extends BroadcastShardOperationRequest {
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
         out.writeFloat(minScore);
+        out.writeUTF(groupField);
 
         out.writeBytesReference(querySource);
 

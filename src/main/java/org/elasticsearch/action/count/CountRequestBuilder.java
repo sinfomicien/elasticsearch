@@ -124,6 +124,11 @@ public class CountRequestBuilder extends BaseRequestBuilder<CountRequest, CountR
         return this;
     }
 
+    public CountRequestBuilder setGroupField(String groupField) {
+        request.groupField(groupField);
+        return this;
+    }
+
     /**
      * Controls the operation threading model.
      */
