@@ -45,6 +45,9 @@ import org.elasticsearch.action.admin.cluster.reroute.ClusterRerouteResponse;
 import org.elasticsearch.action.admin.cluster.settings.ClusterUpdateSettingsRequest;
 import org.elasticsearch.action.admin.cluster.settings.ClusterUpdateSettingsRequestBuilder;
 import org.elasticsearch.action.admin.cluster.settings.ClusterUpdateSettingsResponse;
+import org.elasticsearch.action.admin.cluster.shards.ClusterSearchShardsRequest;
+import org.elasticsearch.action.admin.cluster.shards.ClusterSearchShardsRequestBuilder;
+import org.elasticsearch.action.admin.cluster.shards.ClusterSearchShardsResponse;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateRequest;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateRequestBuilder;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateResponse;
@@ -56,11 +59,11 @@ import org.elasticsearch.action.admin.cluster.state.ClusterStateResponse;
  */
 public interface ClusterAdminClient {
 
-    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response>> ActionFuture<Response> execute(final ClusterAction<Request, Response, RequestBuilder> action, final Request request);
+    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response, RequestBuilder>> ActionFuture<Response> execute(final ClusterAction<Request, Response, RequestBuilder> action, final Request request);
 
-    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response>> void execute(final ClusterAction<Request, Response, RequestBuilder> action, final Request request, ActionListener<Response> listener);
+    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response, RequestBuilder>> void execute(final ClusterAction<Request, Response, RequestBuilder> action, final Request request, ActionListener<Response> listener);
 
-    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response>> RequestBuilder prepareExecute(final ClusterAction<Request, Response, RequestBuilder> action);
+    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response, RequestBuilder>> RequestBuilder prepareExecute(final ClusterAction<Request, Response, RequestBuilder> action);
 
     /**
      * The health of the cluster.
@@ -235,4 +238,25 @@ public interface ClusterAdminClient {
      * Restarts nodes in the cluster.
      */
     NodesRestartRequestBuilder prepareNodesRestart(String... nodesIds);
+
+    /**
+     * Returns list of shards the given search would be executed on.
+     */
+    ActionFuture<ClusterSearchShardsResponse> searchShards(ClusterSearchShardsRequest request);
+
+    /**
+     * Returns list of shards the given search would be executed on.
+     */
+    void searchShards(ClusterSearchShardsRequest request, ActionListener<ClusterSearchShardsResponse> listener);
+
+    /**
+     * Returns list of shards the given search would be executed on.
+     */
+    ClusterSearchShardsRequestBuilder prepareSearchShards();
+
+    /**
+     * Returns list of shards the given search would be executed on.
+     */
+    ClusterSearchShardsRequestBuilder prepareSearchShards(String... indices);
+
 }

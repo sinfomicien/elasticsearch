@@ -19,6 +19,7 @@
 
 package org.elasticsearch.action.support.replication;
 
+import org.elasticsearch.ElasticSearchException;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.ActionResponse;
@@ -63,6 +64,9 @@ public abstract class TransportIndicesReplicationOperationAction<Request extends
         transportService.registerHandler(transportAction, new TransportHandler());
     }
 
+
+    protected abstract Map<String, Set<String>> resolveRouting(ClusterState clusterState, Request request) throws ElasticSearchException;
+
     @Override
     protected void doExecute(final Request request, final ActionListener<Response> listener) {
         ClusterState clusterState = clusterService.state();
@@ -71,7 +75,7 @@ public abstract class TransportIndicesReplicationOperationAction<Request extends
             throw blockException;
         }
         // get actual indices
-        String[] concreteIndices = clusterState.metaData().concreteIndices(request.indices());
+        String[] concreteIndices = clusterState.metaData().concreteIndices(request.indices(), request.ignoreIndices(), false);
         blockException = checkRequestBlock(clusterState, request, concreteIndices);
         if (blockException != null) {
             throw blockException;
@@ -81,37 +85,39 @@ public abstract class TransportIndicesReplicationOperationAction<Request extends
         final AtomicInteger completionCounter = new AtomicInteger(concreteIndices.length);
         final AtomicReferenceArray<Object> indexResponses = new AtomicReferenceArray<Object>(concreteIndices.length);
 
-        Map<String, Set<String>> routingMap = clusterState.metaData().resolveSearchRouting(request.routing(), request.indices());
-
-        for (final String index : concreteIndices) {
-            Set<String> routing = null;
-            if (routingMap != null) {
-                routing = routingMap.get(index);
+        Map<String, Set<String>> routingMap = resolveRouting(clusterState, request);
+        if (concreteIndices == null || concreteIndices.length == 0) {
+            listener.onResponse(newResponseInstance(request, indexResponses));
+        } else {
+            for (final String index : concreteIndices) {
+                Set<String> routing = null;
+                if (routingMap != null) {
+                    routing = routingMap.get(index);
+                }
+                IndexRequest indexRequest = newIndexRequestInstance(request, index, routing);
+                // no threading needed, all is done on the index replication one
+                indexRequest.listenerThreaded(false);
+                indexAction.execute(indexRequest, new ActionListener<IndexResponse>() {
+                    @Override
+                    public void onResponse(IndexResponse result) {
+                        indexResponses.set(indexCounter.getAndIncrement(), result);
+                        if (completionCounter.decrementAndGet() == 0) {
+                            listener.onResponse(newResponseInstance(request, indexResponses));
+                        }
+                    }
+    
+                    @Override
+                    public void onFailure(Throwable e) {
+                        int index = indexCounter.getAndIncrement();
+                        if (accumulateExceptions()) {
+                            indexResponses.set(index, e);
+                        }
+                        if (completionCounter.decrementAndGet() == 0) {
+                            listener.onResponse(newResponseInstance(request, indexResponses));
+                        }
+                    }
+                });
             }
-            IndexRequest indexRequest = newIndexRequestInstance(request, index, routing);
-            // no threading needed, all is done on the index replication one
-            indexRequest.listenerThreaded(false);
-            indexAction.execute(indexRequest, new ActionListener<IndexResponse>() {
-                @Override
-                public void onResponse(IndexResponse result) {
-                    indexResponses.set(indexCounter.getAndIncrement(), result);
-                    if (completionCounter.decrementAndGet() == 0) {
-                        listener.onResponse(newResponseInstance(request, indexResponses));
-                    }
-                }
-
-                @Override
-                public void onFailure(Throwable e) {
-                    e.printStackTrace();
-                    int index = indexCounter.getAndIncrement();
-                    if (accumulateExceptions()) {
-                        indexResponses.set(index, e);
-                    }
-                    if (completionCounter.decrementAndGet() == 0) {
-                        listener.onResponse(newResponseInstance(request, indexResponses));
-                    }
-                }
-            });
         }
     }
 
@@ -150,7 +156,7 @@ public abstract class TransportIndicesReplicationOperationAction<Request extends
                 public void onResponse(Response result) {
                     try {
                         channel.sendResponse(result);
-                    } catch (Exception e) {
+                    } catch (Throwable e) {
                         onFailure(e);
                     }
                 }

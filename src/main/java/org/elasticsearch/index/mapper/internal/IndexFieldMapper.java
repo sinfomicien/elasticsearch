@@ -21,12 +21,15 @@ package org.elasticsearch.index.mapper.internal;
 
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
-import org.apache.lucene.document.Fieldable;
-import org.apache.lucene.index.Term;
+import org.apache.lucene.document.FieldType;
 import org.apache.lucene.index.FieldInfo.IndexOptions;
+import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.lucene.Lucene;
+import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentBuilder;
+import org.elasticsearch.index.codec.postingsformat.PostingsFormatProvider;
+import org.elasticsearch.index.fielddata.FieldDataType;
 import org.elasticsearch.index.mapper.*;
 import org.elasticsearch.index.mapper.core.AbstractFieldMapper;
 
@@ -48,34 +51,38 @@ public class IndexFieldMapper extends AbstractFieldMapper<String> implements Int
     public static class Defaults extends AbstractFieldMapper.Defaults {
         public static final String NAME = IndexFieldMapper.NAME;
         public static final String INDEX_NAME = IndexFieldMapper.NAME;
-        public static final Field.Index INDEX = Field.Index.NOT_ANALYZED;
-        public static final Field.Store STORE = Field.Store.NO;
-        public static final boolean OMIT_NORMS = true;
-        public static final IndexOptions INDEX_OPTIONS = IndexOptions.DOCS_ONLY;
-        public static final boolean ENABLED = false;
+
+        public static final FieldType FIELD_TYPE = new FieldType(AbstractFieldMapper.Defaults.FIELD_TYPE);
+
+        static {
+            FIELD_TYPE.setIndexed(true);
+            FIELD_TYPE.setTokenized(false);
+            FIELD_TYPE.setStored(false);
+            FIELD_TYPE.setOmitNorms(true);
+            FIELD_TYPE.setIndexOptions(IndexOptions.DOCS_ONLY);
+            FIELD_TYPE.freeze();
+        }
+
+        public static final EnabledAttributeMapper ENABLED_STATE = EnabledAttributeMapper.DISABLED;
     }
 
     public static class Builder extends AbstractFieldMapper.Builder<Builder, IndexFieldMapper> {
 
-        private boolean enabled = Defaults.ENABLED;
+        private EnabledAttributeMapper enabledState = EnabledAttributeMapper.UNSET_DISABLED;
 
         public Builder() {
-            super(Defaults.NAME);
+            super(Defaults.NAME, new FieldType(Defaults.FIELD_TYPE));
             indexName = Defaults.INDEX_NAME;
-            index = Defaults.INDEX;
-            store = Defaults.STORE;
-            omitNorms = Defaults.OMIT_NORMS;
-            indexOptions = Defaults.INDEX_OPTIONS;
         }
 
-        public Builder enabled(boolean enabled) {
-            this.enabled = enabled;
+        public Builder enabled(EnabledAttributeMapper enabledState) {
+            this.enabledState = enabledState;
             return this;
         }
 
         @Override
         public IndexFieldMapper build(BuilderContext context) {
-            return new IndexFieldMapper(name, indexName, store, termVector, boost, omitNorms, indexOptions, enabled);
+            return new IndexFieldMapper(name, indexName, boost, fieldType, enabledState, provider, fieldDataSettings);
         }
     }
 
@@ -89,62 +96,56 @@ public class IndexFieldMapper extends AbstractFieldMapper<String> implements Int
                 String fieldName = Strings.toUnderscoreCase(entry.getKey());
                 Object fieldNode = entry.getValue();
                 if (fieldName.equals("enabled")) {
-                    builder.enabled(nodeBooleanValue(fieldNode));
+                    EnabledAttributeMapper mapper = nodeBooleanValue(fieldNode) ? EnabledAttributeMapper.ENABLED : EnabledAttributeMapper.DISABLED;
+                    builder.enabled(mapper);
                 }
             }
             return builder;
         }
     }
 
-    private final boolean enabled;
+    private EnabledAttributeMapper enabledState;
 
     public IndexFieldMapper() {
         this(Defaults.NAME, Defaults.INDEX_NAME);
     }
 
     protected IndexFieldMapper(String name, String indexName) {
-        this(name, indexName, Defaults.STORE, Defaults.TERM_VECTOR, Defaults.BOOST,
-                Defaults.OMIT_NORMS, Defaults.INDEX_OPTIONS, Defaults.ENABLED);
+        this(name, indexName, Defaults.BOOST, new FieldType(Defaults.FIELD_TYPE), Defaults.ENABLED_STATE, null, null);
     }
 
-    public IndexFieldMapper(String name, String indexName, Field.Store store, Field.TermVector termVector,
-                            float boost, boolean omitNorms, IndexOptions indexOptions, boolean enabled) {
-        super(new Names(name, indexName, indexName, name), Defaults.INDEX, store, termVector, boost, omitNorms, indexOptions, Lucene.KEYWORD_ANALYZER,
-                Lucene.KEYWORD_ANALYZER);
-        this.enabled = enabled;
+    public IndexFieldMapper(String name, String indexName, float boost, FieldType fieldType, EnabledAttributeMapper enabledState,
+                            PostingsFormatProvider provider, @Nullable Settings fieldDataSettings) {
+        super(new Names(name, indexName, indexName, name), boost, fieldType, Lucene.KEYWORD_ANALYZER,
+                Lucene.KEYWORD_ANALYZER, provider, null, fieldDataSettings);
+        this.enabledState = enabledState;
     }
 
     public boolean enabled() {
-        return this.enabled;
+        return this.enabledState.enabled;
+    }
+
+    @Override
+    public FieldType defaultFieldType() {
+        return Defaults.FIELD_TYPE;
+    }
+
+    @Override
+    public FieldDataType defaultFieldDataType() {
+        return new FieldDataType("string");
     }
 
     public String value(Document document) {
-        Fieldable field = document.getFieldable(names.indexName());
+        Field field = (Field) document.getField(names.indexName());
         return field == null ? null : value(field);
     }
 
     @Override
-    public String value(Fieldable field) {
-        return field.stringValue();
-    }
-
-    @Override
-    public String valueFromString(String value) {
-        return value;
-    }
-
-    @Override
-    public String valueAsString(Fieldable field) {
-        return value(field);
-    }
-
-    @Override
-    public String indexedValue(String value) {
-        return value;
-    }
-
-    public Term term(String value) {
-        return names().createIndexNameTerm(value);
+    public String value(Object value) {
+        if (value == null) {
+            return null;
+        }
+        return value.toString();
     }
 
     @Override
@@ -173,10 +174,10 @@ public class IndexFieldMapper extends AbstractFieldMapper<String> implements Int
 
     @Override
     protected Field parseCreateField(ParseContext context) throws IOException {
-        if (!enabled) {
+        if (!enabledState.enabled) {
             return null;
         }
-        return new Field(names.indexName(), context.index(), store, index);
+        return new Field(names.indexName(), context.index(), fieldType);
     }
 
     @Override
@@ -187,15 +188,15 @@ public class IndexFieldMapper extends AbstractFieldMapper<String> implements Int
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
         // if all defaults, no need to write it at all
-        if (store == Defaults.STORE && enabled == Defaults.ENABLED) {
+        if (fieldType().stored() == Defaults.FIELD_TYPE.stored() && enabledState == Defaults.ENABLED_STATE) {
             return builder;
         }
         builder.startObject(CONTENT_TYPE);
-        if (store != Defaults.STORE) {
-            builder.field("store", store.name().toLowerCase());
+        if (fieldType().stored() != Defaults.FIELD_TYPE.stored() && enabledState.enabled) {
+            builder.field("store", fieldType().stored());
         }
-        if (enabled != Defaults.ENABLED) {
-            builder.field("enabled", enabled);
+        if (enabledState != Defaults.ENABLED_STATE) {
+            builder.field("enabled", enabledState.enabled);
         }
         builder.endObject();
         return builder;
@@ -203,6 +204,11 @@ public class IndexFieldMapper extends AbstractFieldMapper<String> implements Int
 
     @Override
     public void merge(Mapper mergeWith, MergeContext mergeContext) throws MergeMappingException {
-        // do nothing here, no merging, but also no exception
+        IndexFieldMapper indexFieldMapperMergeWith = (IndexFieldMapper) mergeWith;
+        if (!mergeContext.mergeFlags().simulate()) {
+            if (indexFieldMapperMergeWith.enabledState != enabledState && !indexFieldMapperMergeWith.enabledState.unset()) {
+                this.enabledState = indexFieldMapperMergeWith.enabledState;
+            }
+        }
     }
 }

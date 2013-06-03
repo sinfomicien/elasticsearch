@@ -31,11 +31,11 @@ import static org.elasticsearch.action.ValidateActions.addValidationError;
 /**
  *
  */
-public class DeleteMappingRequest extends MasterNodeOperationRequest {
+public class DeleteMappingRequest extends MasterNodeOperationRequest<DeleteMappingRequest> {
 
     private String[] indices;
 
-    private String mappingType;
+    private String type;
 
     DeleteMappingRequest() {
     }
@@ -51,7 +51,7 @@ public class DeleteMappingRequest extends MasterNodeOperationRequest {
     @Override
     public ActionRequestValidationException validate() {
         ActionRequestValidationException validationException = null;
-        if (mappingType == null) {
+        if (type == null) {
             validationException = addValidationError("mapping type is missing", validationException);
         }
         return validationException;
@@ -76,14 +76,14 @@ public class DeleteMappingRequest extends MasterNodeOperationRequest {
      * The mapping type.
      */
     public String type() {
-        return mappingType;
+        return type;
     }
 
     /**
      * The type of the mappings to remove.
      */
-    public DeleteMappingRequest type(String mappingType) {
-        this.mappingType = mappingType;
+    public DeleteMappingRequest type(String type) {
+        this.type = type;
         return this;
     }
 
@@ -92,10 +92,10 @@ public class DeleteMappingRequest extends MasterNodeOperationRequest {
         super.readFrom(in);
         indices = new String[in.readVInt()];
         for (int i = 0; i < indices.length; i++) {
-            indices[i] = in.readUTF();
+            indices[i] = in.readString();
         }
         if (in.readBoolean()) {
-            mappingType = in.readUTF();
+            type = in.readString();
         }
     }
 
@@ -107,14 +107,14 @@ public class DeleteMappingRequest extends MasterNodeOperationRequest {
         } else {
             out.writeVInt(indices.length);
             for (String index : indices) {
-                out.writeUTF(index);
+                out.writeString(index);
             }
         }
-        if (mappingType == null) {
+        if (type == null) {
             out.writeBoolean(false);
         } else {
             out.writeBoolean(true);
-            out.writeUTF(mappingType);
+            out.writeString(type);
         }
     }
 }

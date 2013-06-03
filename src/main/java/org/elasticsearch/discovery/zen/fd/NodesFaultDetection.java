@@ -25,7 +25,6 @@ import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.threadpool.ThreadPool;
@@ -305,7 +304,7 @@ public class NodesFaultDetection extends AbstractComponent {
     }
 
 
-    static class PingRequest implements Streamable {
+    static class PingRequest extends TransportRequest {
 
         // the (assumed) node id we are pinging
         private String nodeId;
@@ -319,26 +318,30 @@ public class NodesFaultDetection extends AbstractComponent {
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
-            nodeId = in.readUTF();
+            super.readFrom(in);
+            nodeId = in.readString();
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
-            out.writeUTF(nodeId);
+            super.writeTo(out);
+            out.writeString(nodeId);
         }
     }
 
-    private static class PingResponse implements Streamable {
+    private static class PingResponse extends TransportResponse {
 
         private PingResponse() {
         }
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
+            super.readFrom(in);
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
+            super.writeTo(out);
         }
     }
 }

@@ -24,6 +24,11 @@ import org.elasticsearch.action.admin.indices.IndicesAction;
 import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequest;
 import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequestBuilder;
 import org.elasticsearch.action.admin.indices.alias.IndicesAliasesResponse;
+import org.elasticsearch.action.admin.indices.alias.exists.IndicesExistsAliasesRequestBuilder;
+import org.elasticsearch.action.admin.indices.alias.exists.IndicesExistsAliasesResponse;
+import org.elasticsearch.action.admin.indices.alias.get.IndicesGetAliasesRequest;
+import org.elasticsearch.action.admin.indices.alias.get.IndicesGetAliasesRequestBuilder;
+import org.elasticsearch.action.admin.indices.alias.get.IndicesGetAliasesResponse;
 import org.elasticsearch.action.admin.indices.analyze.AnalyzeRequest;
 import org.elasticsearch.action.admin.indices.analyze.AnalyzeRequestBuilder;
 import org.elasticsearch.action.admin.indices.analyze.AnalyzeResponse;
@@ -39,9 +44,12 @@ import org.elasticsearch.action.admin.indices.create.CreateIndexResponse;
 import org.elasticsearch.action.admin.indices.delete.DeleteIndexRequest;
 import org.elasticsearch.action.admin.indices.delete.DeleteIndexRequestBuilder;
 import org.elasticsearch.action.admin.indices.delete.DeleteIndexResponse;
-import org.elasticsearch.action.admin.indices.exists.IndicesExistsRequest;
-import org.elasticsearch.action.admin.indices.exists.IndicesExistsRequestBuilder;
-import org.elasticsearch.action.admin.indices.exists.IndicesExistsResponse;
+import org.elasticsearch.action.admin.indices.exists.indices.IndicesExistsRequest;
+import org.elasticsearch.action.admin.indices.exists.indices.IndicesExistsRequestBuilder;
+import org.elasticsearch.action.admin.indices.exists.indices.IndicesExistsResponse;
+import org.elasticsearch.action.admin.indices.exists.types.TypesExistsRequest;
+import org.elasticsearch.action.admin.indices.exists.types.TypesExistsRequestBuilder;
+import org.elasticsearch.action.admin.indices.exists.types.TypesExistsResponse;
 import org.elasticsearch.action.admin.indices.flush.FlushRequest;
 import org.elasticsearch.action.admin.indices.flush.FlushRequestBuilder;
 import org.elasticsearch.action.admin.indices.flush.FlushResponse;
@@ -69,9 +77,9 @@ import org.elasticsearch.action.admin.indices.segments.IndicesSegmentsRequestBui
 import org.elasticsearch.action.admin.indices.settings.UpdateSettingsRequest;
 import org.elasticsearch.action.admin.indices.settings.UpdateSettingsRequestBuilder;
 import org.elasticsearch.action.admin.indices.settings.UpdateSettingsResponse;
-import org.elasticsearch.action.admin.indices.stats.IndicesStats;
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsRequest;
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsRequestBuilder;
+import org.elasticsearch.action.admin.indices.stats.IndicesStatsResponse;
 import org.elasticsearch.action.admin.indices.status.IndicesStatusRequest;
 import org.elasticsearch.action.admin.indices.status.IndicesStatusRequestBuilder;
 import org.elasticsearch.action.admin.indices.status.IndicesStatusResponse;
@@ -99,11 +107,11 @@ import org.elasticsearch.common.Nullable;
  */
 public interface IndicesAdminClient {
 
-    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response>> ActionFuture<Response> execute(final IndicesAction<Request, Response, RequestBuilder> action, final Request request);
+    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response, RequestBuilder>> ActionFuture<Response> execute(final IndicesAction<Request, Response, RequestBuilder> action, final Request request);
 
-    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response>> void execute(final IndicesAction<Request, Response, RequestBuilder> action, final Request request, ActionListener<Response> listener);
+    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response, RequestBuilder>> void execute(final IndicesAction<Request, Response, RequestBuilder> action, final Request request, ActionListener<Response> listener);
 
-    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response>> RequestBuilder prepareExecute(final IndicesAction<Request, Response, RequestBuilder> action);
+    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response, RequestBuilder>> RequestBuilder prepareExecute(final IndicesAction<Request, Response, RequestBuilder> action);
 
 
     /**
@@ -129,15 +137,37 @@ public interface IndicesAdminClient {
      */
     IndicesExistsRequestBuilder prepareExists(String... indices);
 
+
     /**
-     * Indices stats.
+     * Types Exists.
+     *
+     * @param request The types exists request
+     * @return The result future
      */
-    ActionFuture<IndicesStats> stats(IndicesStatsRequest request);
+    ActionFuture<TypesExistsResponse> typesExists(TypesExistsRequest request);
+
+    /**
+     * Types exists
+     *
+     * @param request  The types exists
+     * @param listener A listener to be notified with a result
+     */
+    void typesExists(TypesExistsRequest request, ActionListener<TypesExistsResponse> listener);
+
+    /**
+     * Indices exists.
+     */
+    TypesExistsRequestBuilder prepareTypesExists(String... index);
 
     /**
      * Indices stats.
      */
-    void stats(IndicesStatsRequest request, ActionListener<IndicesStats> listener);
+    ActionFuture<IndicesStatsResponse> stats(IndicesStatsRequest request);
+
+    /**
+     * Indices stats.
+     */
+    void stats(IndicesStatsRequest request, ActionListener<IndicesStatsResponse> listener);
 
     /**
      * Indices stats.
@@ -450,6 +480,46 @@ public interface IndicesAdminClient {
      * Allows to add/remove aliases from indices.
      */
     IndicesAliasesRequestBuilder prepareAliases();
+
+    /**
+     * Get specific index aliases that exists in particular indices and / or by name.
+     *
+     * @param request The result future
+     */
+    ActionFuture<IndicesGetAliasesResponse> getAliases(IndicesGetAliasesRequest request);
+
+    /**
+     * Get specific index aliases that exists in particular indices and / or by name.
+     *
+     * @param request  The index aliases request
+     * @param listener A listener to be notified with a result
+     */
+    void getAliases(IndicesGetAliasesRequest request, ActionListener<IndicesGetAliasesResponse> listener);
+
+    /**
+     * Get specific index aliases that exists in particular indices and / or by name.
+     */
+    IndicesGetAliasesRequestBuilder prepareGetAliases(String... aliases);
+
+    /**
+     * Allows to check to existence of aliases from indices.
+     */
+    IndicesExistsAliasesRequestBuilder prepareExistsAliases(String... aliases);
+
+    /**
+     * Check to existence of index aliases.
+     *
+     * @param request The result future
+     */
+    ActionFuture<IndicesExistsAliasesResponse> existsAliases(IndicesGetAliasesRequest request);
+
+    /**
+     * Check the existence of specified index aliases.
+     *
+     * @param request  The index aliases request
+     * @param listener A listener to be notified with a result
+     */
+    void existsAliases(IndicesGetAliasesRequest request, ActionListener<IndicesExistsAliasesResponse> listener);
 
     /**
      * Clear indices cache.

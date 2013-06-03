@@ -20,18 +20,24 @@
 package org.elasticsearch.index.mapper.core;
 
 import org.apache.lucene.document.Field;
-import org.apache.lucene.document.Fieldable;
+import org.apache.lucene.document.FieldType;
 import org.apache.lucene.index.FieldInfo.IndexOptions;
 import org.apache.lucene.search.Filter;
+import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.common.Booleans;
+import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.lucene.Lucene;
 import org.elasticsearch.common.lucene.search.TermFilter;
+import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentParser;
+import org.elasticsearch.index.codec.postingsformat.PostingsFormatProvider;
+import org.elasticsearch.index.fielddata.FieldDataType;
 import org.elasticsearch.index.mapper.Mapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
 import org.elasticsearch.index.mapper.ParseContext;
+import org.elasticsearch.index.similarity.SimilarityProvider;
 
 import java.io.IOException;
 import java.util.Map;
@@ -49,8 +55,20 @@ public class BooleanFieldMapper extends AbstractFieldMapper<Boolean> {
     public static final String CONTENT_TYPE = "boolean";
 
     public static class Defaults extends AbstractFieldMapper.Defaults {
-        public static final boolean OMIT_NORMS = true;
+        public static final FieldType FIELD_TYPE = new FieldType(AbstractFieldMapper.Defaults.FIELD_TYPE);
+
+        static {
+            FIELD_TYPE.setOmitNorms(true);
+            FIELD_TYPE.setIndexOptions(IndexOptions.DOCS_ONLY);
+            FIELD_TYPE.freeze();
+        }
+
         public static final Boolean NULL_VALUE = null;
+    }
+
+    public static class Values {
+        public final static BytesRef TRUE = new BytesRef("T");
+        public final static BytesRef FALSE = new BytesRef("F");
     }
 
     public static class Builder extends AbstractFieldMapper.Builder<Builder, BooleanFieldMapper> {
@@ -58,8 +76,7 @@ public class BooleanFieldMapper extends AbstractFieldMapper<Boolean> {
         private Boolean nullValue = Defaults.NULL_VALUE;
 
         public Builder(String name) {
-            super(name);
-            this.omitNorms = Defaults.OMIT_NORMS;
+            super(name, new FieldType(Defaults.FIELD_TYPE));
             this.builder = this;
         }
 
@@ -69,35 +86,8 @@ public class BooleanFieldMapper extends AbstractFieldMapper<Boolean> {
         }
 
         @Override
-        public Builder index(Field.Index index) {
-            return super.index(index);
-        }
-
-        @Override
-        public Builder store(Field.Store store) {
-            return super.store(store);
-        }
-
-        @Override
-        public Builder termVector(Field.TermVector termVector) {
-            return super.termVector(termVector);
-        }
-
-        @Override
-        public Builder boost(float boost) {
-            return super.boost(boost);
-        }
-
-        @Override
-        public Builder indexName(String indexName) {
-            return super.indexName(indexName);
-        }
-
-
-        @Override
         public BooleanFieldMapper build(BuilderContext context) {
-            return new BooleanFieldMapper(buildNames(context), index, store,
-                    termVector, boost, omitNorms, indexOptions, nullValue);
+            return new BooleanFieldMapper(buildNames(context), boost, fieldType, nullValue, provider, similarity, fieldDataSettings);
         }
     }
 
@@ -119,44 +109,74 @@ public class BooleanFieldMapper extends AbstractFieldMapper<Boolean> {
 
     private Boolean nullValue;
 
-    protected BooleanFieldMapper(Names names, Field.Index index, Field.Store store, Field.TermVector termVector,
-                                 float boost, boolean omitNorms, IndexOptions indexOptions, Boolean nullValue) {
-        super(names, index, store, termVector, boost, omitNorms, indexOptions, Lucene.KEYWORD_ANALYZER, Lucene.KEYWORD_ANALYZER);
+    protected BooleanFieldMapper(Names names, float boost, FieldType fieldType, Boolean nullValue, PostingsFormatProvider provider, SimilarityProvider similarity, @Nullable Settings fieldDataSettings) {
+        super(names, boost, fieldType, Lucene.KEYWORD_ANALYZER, Lucene.KEYWORD_ANALYZER, provider, similarity, fieldDataSettings);
         this.nullValue = nullValue;
     }
 
     @Override
-    public boolean useFieldQueryWithQueryString() {
+    public FieldType defaultFieldType() {
+        return Defaults.FIELD_TYPE;
+    }
+
+    @Override
+    public FieldDataType defaultFieldDataType() {
+        // TODO have a special boolean type?
+        return new FieldDataType("string");
+    }
+
+    @Override
+    public boolean useTermQueryWithQueryString() {
         return true;
     }
 
     @Override
-    public Boolean value(Fieldable field) {
-        return field.stringValue().charAt(0) == 'T' ? Boolean.TRUE : Boolean.FALSE;
+    public Boolean value(Object value) {
+        if (value == null) {
+            return Boolean.FALSE;
+        }
+        String sValue = value.toString();
+        if (sValue.length() == 0) {
+            return Boolean.FALSE;
+        }
+        if (sValue.length() == 1 && sValue.charAt(0) == 'F') {
+            return Boolean.FALSE;
+        }
+        if (Booleans.parseBoolean(sValue, false)) {
+            return Boolean.TRUE;
+        }
+        return Boolean.FALSE;
     }
 
     @Override
-    public Boolean valueFromString(String value) {
-        return value.charAt(0) == 'T' ? Boolean.TRUE : Boolean.FALSE;
+    public Object valueForSearch(Object value) {
+        return value(value);
     }
 
     @Override
-    public String valueAsString(Fieldable field) {
-        return field.stringValue().charAt(0) == 'T' ? "true" : "false";
-    }
-
-    @Override
-    public String indexedValue(String value) {
-        if (value == null || value.length() == 0) {
-            return "F";
+    public BytesRef indexedValueForSearch(Object value) {
+        if (value == null) {
+            return Values.FALSE;
         }
-        if (value.length() == 1 && value.charAt(0) == 'F') {
-            return "F";
+        if (value instanceof Boolean) {
+            return ((Boolean) value) ? Values.TRUE : Values.FALSE;
         }
-        if (Booleans.parseBoolean(value, false)) {
-            return "T";
+        String sValue;
+        if (value instanceof BytesRef) {
+            sValue = ((BytesRef) value).utf8ToString();
+        } else {
+            sValue = value.toString();
         }
-        return "F";
+        if (sValue.length() == 0) {
+            return Values.FALSE;
+        }
+        if (sValue.length() == 1 && sValue.charAt(0) == 'F') {
+            return Values.FALSE;
+        }
+        if (Booleans.parseBoolean(sValue, false)) {
+            return Values.TRUE;
+        }
+        return Values.FALSE;
     }
 
     @Override
@@ -164,12 +184,12 @@ public class BooleanFieldMapper extends AbstractFieldMapper<Boolean> {
         if (nullValue == null) {
             return null;
         }
-        return new TermFilter(names().createIndexNameTerm(nullValue ? "T" : "F"));
+        return new TermFilter(names().createIndexNameTerm(nullValue ? Values.TRUE : Values.FALSE));
     }
 
     @Override
     protected Field parseCreateField(ParseContext context) throws IOException {
-        if (!indexed() && !stored()) {
+        if (!fieldType().indexed() && !fieldType().stored()) {
             return null;
         }
         XContentParser.Token token = context.parser().currentToken();
@@ -184,7 +204,7 @@ public class BooleanFieldMapper extends AbstractFieldMapper<Boolean> {
         if (value == null) {
             return null;
         }
-        return new Field(names.indexName(), value, store, index, termVector);
+        return new Field(names.indexName(), value, fieldType);
     }
 
     @Override
@@ -195,21 +215,6 @@ public class BooleanFieldMapper extends AbstractFieldMapper<Boolean> {
     @Override
     protected void doXContentBody(XContentBuilder builder) throws IOException {
         super.doXContentBody(builder);
-        if (index != Defaults.INDEX) {
-            builder.field("index", index.name().toLowerCase());
-        }
-        if (store != Defaults.STORE) {
-            builder.field("store", store.name().toLowerCase());
-        }
-        if (termVector != Defaults.TERM_VECTOR) {
-            builder.field("term_vector", termVector.name().toLowerCase());
-        }
-        if (omitNorms != Defaults.OMIT_NORMS) {
-            builder.field("omit_norms", omitNorms);
-        }
-        if (indexOptions != Defaults.INDEX_OPTIONS) {
-            builder.field("index_options", indexOptionToString(indexOptions));
-        }
         if (nullValue != null) {
             builder.field("null_value", nullValue);
         }

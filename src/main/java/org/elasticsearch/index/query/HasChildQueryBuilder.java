@@ -32,22 +32,13 @@ public class HasChildQueryBuilder extends BaseQueryBuilder implements BoostableQ
 
     private String childType;
 
-    private String scope;
-
     private float boost = 1.0f;
+
+    private String scoreType;
 
     public HasChildQueryBuilder(String type, QueryBuilder queryBuilder) {
         this.childType = type;
         this.queryBuilder = queryBuilder;
-    }
-
-    /**
-     * The scope of the query, which can later be used, for example, to run facets against the child docs that
-     * matches the query.
-     */
-    public HasChildQueryBuilder scope(String scope) {
-        this.scope = scope;
-        return this;
     }
 
     /**
@@ -59,17 +50,25 @@ public class HasChildQueryBuilder extends BaseQueryBuilder implements BoostableQ
         return this;
     }
 
+    /**
+     * Defines how the scores from the matching child documents are mapped into the parent document.
+     */
+    public HasChildQueryBuilder scoreType(String scoreType) {
+        this.scoreType = scoreType;
+        return this;
+    }
+
     @Override
     protected void doXContent(XContentBuilder builder, Params params) throws IOException {
         builder.startObject(HasChildQueryParser.NAME);
         builder.field("query");
         queryBuilder.toXContent(builder, params);
-        builder.field("type", childType);
-        if (scope != null) {
-            builder.field("_scope", scope);
-        }
+        builder.field("child_type", childType);
         if (boost != 1.0f) {
             builder.field("boost", boost);
+        }
+        if (scoreType != null) {
+            builder.field("score_type", scoreType);
         }
         builder.endObject();
     }

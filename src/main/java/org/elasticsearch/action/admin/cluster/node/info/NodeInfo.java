@@ -20,6 +20,7 @@
 package org.elasticsearch.action.admin.cluster.node.info;
 
 import com.google.common.collect.ImmutableMap;
+import org.elasticsearch.Version;
 import org.elasticsearch.action.support.nodes.NodeOperationResponse;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.common.Nullable;
@@ -49,6 +50,8 @@ public class NodeInfo extends NodeOperationResponse {
     @Nullable
     private String hostname;
 
+    private Version version;
+
     @Nullable
     private Settings settings;
 
@@ -73,14 +76,18 @@ public class NodeInfo extends NodeOperationResponse {
     @Nullable
     private HttpInfo http;
 
+    @Nullable
+    private PluginsInfo plugins;
+
     NodeInfo() {
     }
 
-    public NodeInfo(@Nullable String hostname, DiscoveryNode node, @Nullable ImmutableMap<String, String> serviceAttributes, @Nullable Settings settings,
+    public NodeInfo(@Nullable String hostname, Version version, DiscoveryNode node, @Nullable ImmutableMap<String, String> serviceAttributes, @Nullable Settings settings,
                     @Nullable OsInfo os, @Nullable ProcessInfo process, @Nullable JvmInfo jvm, @Nullable ThreadPoolInfo threadPool, @Nullable NetworkInfo network,
-                    @Nullable TransportInfo transport, @Nullable HttpInfo http) {
+                    @Nullable TransportInfo transport, @Nullable HttpInfo http, @Nullable PluginsInfo plugins) {
         super(node);
         this.hostname = hostname;
+        this.version = version;
         this.serviceAttributes = serviceAttributes;
         this.settings = settings;
         this.os = os;
@@ -90,14 +97,7 @@ public class NodeInfo extends NodeOperationResponse {
         this.network = network;
         this.transport = transport;
         this.http = http;
-    }
-
-    /**
-     * System's hostname. <code>null</code> in case of UnknownHostException
-     */
-    @Nullable
-    public String hostname() {
-        return this.hostname;
+        this.plugins = plugins;
     }
 
     /**
@@ -105,31 +105,22 @@ public class NodeInfo extends NodeOperationResponse {
      */
     @Nullable
     public String getHostname() {
-        return hostname();
+        return this.hostname;
+    }
+
+    /**
+     * The current ES version
+     */
+    public Version getVersion() {
+        return version;
     }
 
     /**
      * The service attributes of the node.
      */
     @Nullable
-    public ImmutableMap<String, String> serviceAttributes() {
-        return this.serviceAttributes;
-    }
-
-    /**
-     * The attributes of the node.
-     */
-    @Nullable
     public ImmutableMap<String, String> getServiceAttributes() {
-        return serviceAttributes();
-    }
-
-    /**
-     * The settings of the node.
-     */
-    @Nullable
-    public Settings settings() {
-        return this.settings;
+        return this.serviceAttributes;
     }
 
     /**
@@ -137,15 +128,7 @@ public class NodeInfo extends NodeOperationResponse {
      */
     @Nullable
     public Settings getSettings() {
-        return settings();
-    }
-
-    /**
-     * Operating System level information.
-     */
-    @Nullable
-    public OsInfo os() {
-        return this.os;
+        return this.settings;
     }
 
     /**
@@ -153,15 +136,7 @@ public class NodeInfo extends NodeOperationResponse {
      */
     @Nullable
     public OsInfo getOs() {
-        return os();
-    }
-
-    /**
-     * Process level information.
-     */
-    @Nullable
-    public ProcessInfo process() {
-        return process;
+        return this.os;
     }
 
     /**
@@ -169,15 +144,7 @@ public class NodeInfo extends NodeOperationResponse {
      */
     @Nullable
     public ProcessInfo getProcess() {
-        return process();
-    }
-
-    /**
-     * JVM level information.
-     */
-    @Nullable
-    public JvmInfo jvm() {
-        return jvm;
+        return process;
     }
 
     /**
@@ -185,25 +152,12 @@ public class NodeInfo extends NodeOperationResponse {
      */
     @Nullable
     public JvmInfo getJvm() {
-        return jvm();
-    }
-
-    @Nullable
-    public ThreadPoolInfo threadPool() {
-        return this.threadPool;
+        return jvm;
     }
 
     @Nullable
     public ThreadPoolInfo getThreadPool() {
-        return threadPool();
-    }
-
-    /**
-     * Network level information.
-     */
-    @Nullable
-    public NetworkInfo network() {
-        return network;
+        return this.threadPool;
     }
 
     /**
@@ -211,27 +165,22 @@ public class NodeInfo extends NodeOperationResponse {
      */
     @Nullable
     public NetworkInfo getNetwork() {
-        return network();
-    }
-
-    @Nullable
-    public TransportInfo transport() {
-        return transport;
+        return network;
     }
 
     @Nullable
     public TransportInfo getTransport() {
-        return transport();
-    }
-
-    @Nullable
-    public HttpInfo http() {
-        return http;
+        return transport;
     }
 
     @Nullable
     public HttpInfo getHttp() {
-        return http();
+        return http;
+    }
+
+    @Nullable
+    public PluginsInfo getPlugins() {
+        return this.plugins;
     }
 
     public static NodeInfo readNodeInfo(StreamInput in) throws IOException {
@@ -244,13 +193,14 @@ public class NodeInfo extends NodeOperationResponse {
     public void readFrom(StreamInput in) throws IOException {
         super.readFrom(in);
         if (in.readBoolean()) {
-            hostname = in.readUTF();
+            hostname = in.readString();
         }
+        version = Version.readVersion(in);
         if (in.readBoolean()) {
             ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
             int size = in.readVInt();
             for (int i = 0; i < size; i++) {
-                builder.put(in.readUTF(), in.readUTF());
+                builder.put(in.readString(), in.readString());
             }
             serviceAttributes = builder.build();
         }
@@ -278,6 +228,9 @@ public class NodeInfo extends NodeOperationResponse {
         if (in.readBoolean()) {
             http = HttpInfo.readHttpInfo(in);
         }
+        if (in.readBoolean()) {
+            plugins = PluginsInfo.readPluginsInfo(in);
+        }
     }
 
     @Override
@@ -287,16 +240,17 @@ public class NodeInfo extends NodeOperationResponse {
             out.writeBoolean(false);
         } else {
             out.writeBoolean(true);
-            out.writeUTF(hostname);
+            out.writeString(hostname);
         }
-        if (serviceAttributes() == null) {
+        out.writeVInt(version.id);
+        if (getServiceAttributes() == null) {
             out.writeBoolean(false);
         } else {
             out.writeBoolean(true);
             out.writeVInt(serviceAttributes.size());
             for (Map.Entry<String, String> entry : serviceAttributes.entrySet()) {
-                out.writeUTF(entry.getKey());
-                out.writeUTF(entry.getValue());
+                out.writeString(entry.getKey());
+                out.writeString(entry.getValue());
             }
         }
         if (settings == null) {
@@ -347,5 +301,12 @@ public class NodeInfo extends NodeOperationResponse {
             out.writeBoolean(true);
             http.writeTo(out);
         }
+        if (plugins == null) {
+            out.writeBoolean(false);
+        } else {
+            out.writeBoolean(true);
+            plugins.writeTo(out);
+        }
     }
+
 }

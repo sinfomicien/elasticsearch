@@ -20,6 +20,7 @@
 package org.elasticsearch.search.highlight;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  *
@@ -58,8 +59,14 @@ public class SearchContextHighlight {
 
         private Boolean requireFieldMatch;
 
+        private String highlighterType;
+
+        private String fragmenter;
+
         private int boundaryMaxScan = -1;
         private char[] boundaryChars = null;
+
+        private Map<String, Object> options;
 
         public Field(String field) {
             this.field = field;
@@ -141,6 +148,22 @@ public class SearchContextHighlight {
             this.requireFieldMatch = requireFieldMatch;
         }
 
+        public String highlighterType() {
+            return highlighterType;
+        }
+
+        public void highlighterType(String type) {
+            this.highlighterType = type;
+        }
+
+        public String fragmenter() {
+            return fragmenter;
+        }
+
+        public void fragmenter(String fragmenter) {
+            this.fragmenter = fragmenter;
+        }
+
         public int boundaryMaxScan() {
             return boundaryMaxScan;
         }
@@ -155,6 +178,14 @@ public class SearchContextHighlight {
 
         public void boundaryChars(char[] boundaryChars) {
             this.boundaryChars = boundaryChars;
+        }
+
+        public Map<String, Object> options() {
+            return options;
+        }
+
+        public void options(Map<String, Object> options) {
+            this.options = options;
         }
     }
 }

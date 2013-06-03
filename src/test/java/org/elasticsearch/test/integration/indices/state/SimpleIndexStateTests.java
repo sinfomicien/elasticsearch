@@ -21,16 +21,21 @@ package org.elasticsearch.test.integration.indices.state;
 
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateResponse;
+import org.elasticsearch.action.admin.indices.create.CreateIndexResponse;
 import org.elasticsearch.action.admin.indices.status.IndicesStatusResponse;
 import org.elasticsearch.cluster.block.ClusterBlockException;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.cluster.routing.ShardRoutingState;
+import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
+import org.elasticsearch.common.settings.SettingsException;
+import org.elasticsearch.indices.IndexMissingException;
 import org.elasticsearch.test.integration.AbstractNodesTests;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.Test;
 
+import static org.elasticsearch.common.settings.ImmutableSettings.settingsBuilder;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.nullValue;
@@ -57,13 +62,13 @@ public class SimpleIndexStateTests extends AbstractNodesTests {
         client("node1").admin().indices().prepareCreate("test").execute().actionGet();
 
         logger.info("--> waiting for green status");
-        ClusterHealthResponse health = client("node1").admin().cluster().prepareHealth().setWaitForGreenStatus().setWaitForNodes("2").execute().actionGet();
-        assertThat(health.timedOut(), equalTo(false));
+        ClusterHealthResponse health = client("node1").admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().setWaitForNodes("2").execute().actionGet();
+        assertThat(health.isTimedOut(), equalTo(false));
 
         ClusterStateResponse stateResponse = client("node1").admin().cluster().prepareState().execute().actionGet();
-        assertThat(stateResponse.state().metaData().index("test").state(), equalTo(IndexMetaData.State.OPEN));
-        assertThat(stateResponse.state().routingTable().index("test").shards().size(), equalTo(5));
-        assertThat(stateResponse.state().routingTable().index("test").shardsWithState(ShardRoutingState.STARTED).size(), equalTo(10));
+        assertThat(stateResponse.getState().metaData().index("test").state(), equalTo(IndexMetaData.State.OPEN));
+        assertThat(stateResponse.getState().routingTable().index("test").shards().size(), equalTo(5));
+        assertThat(stateResponse.getState().routingTable().index("test").shardsWithState(ShardRoutingState.STARTED).size(), equalTo(10));
 
         logger.info("--> indexing a simple document");
         client("node1").prepareIndex("test", "type1", "1").setSource("field1", "value1").execute().actionGet();
@@ -72,8 +77,8 @@ public class SimpleIndexStateTests extends AbstractNodesTests {
         client("node1").admin().indices().prepareClose("test").execute().actionGet();
 
         stateResponse = client("node1").admin().cluster().prepareState().execute().actionGet();
-        assertThat(stateResponse.state().metaData().index("test").state(), equalTo(IndexMetaData.State.CLOSE));
-        assertThat(stateResponse.state().routingTable().index("test"), nullValue());
+        assertThat(stateResponse.getState().metaData().index("test").state(), equalTo(IndexMetaData.State.CLOSE));
+        assertThat(stateResponse.getState().routingTable().index("test"), nullValue());
 
         logger.info("--> testing indices status api...");
         IndicesStatusResponse indicesStatusResponse = client("node1").admin().indices().prepareStatus().execute().actionGet();
@@ -90,15 +95,41 @@ public class SimpleIndexStateTests extends AbstractNodesTests {
         client("node1").admin().indices().prepareOpen("test").execute().actionGet();
 
         logger.info("--> waiting for green status");
-        health = client("node1").admin().cluster().prepareHealth().setWaitForGreenStatus().setWaitForNodes("2").execute().actionGet();
-        assertThat(health.timedOut(), equalTo(false));
+        health = client("node1").admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().setWaitForNodes("2").execute().actionGet();
+        assertThat(health.isTimedOut(), equalTo(false));
 
         stateResponse = client("node1").admin().cluster().prepareState().execute().actionGet();
-        assertThat(stateResponse.state().metaData().index("test").state(), equalTo(IndexMetaData.State.OPEN));
-        assertThat(stateResponse.state().routingTable().index("test").shards().size(), equalTo(5));
-        assertThat(stateResponse.state().routingTable().index("test").shardsWithState(ShardRoutingState.STARTED).size(), equalTo(10));
+        assertThat(stateResponse.getState().metaData().index("test").state(), equalTo(IndexMetaData.State.OPEN));
+        assertThat(stateResponse.getState().routingTable().index("test").shards().size(), equalTo(5));
+        assertThat(stateResponse.getState().routingTable().index("test").shardsWithState(ShardRoutingState.STARTED).size(), equalTo(10));
 
         logger.info("--> indexing a simple document");
         client("node1").prepareIndex("test", "type1", "1").setSource("field1", "value1").execute().actionGet();
     }
+
+    @Test
+    public void testConsistencyAfterIndexCreationFailure() {
+        logger.info("--> starting one node....");
+        startNode("node1");
+
+        logger.info("--> deleting test index....");
+        try {
+            client("node1").admin().indices().prepareDelete("test").execute().actionGet();
+        } catch (IndexMissingException ex) {
+            // Ignore
+        }
+
+        logger.info("--> creating test index with invalid settings ");
+        try {
+            client("node1").admin().indices().prepareCreate("test").setSettings(settingsBuilder().put("number_of_shards", "bad")).execute().actionGet();
+            assert false;
+        } catch (SettingsException ex) {
+            // Expected
+        }
+
+        logger.info("--> creating test index with valid settings ");
+        CreateIndexResponse response = client("node1").admin().indices().prepareCreate("test").setSettings(settingsBuilder().put("number_of_shards", 1)).execute().actionGet();
+        assertThat(response.isAcknowledged(), equalTo(true));
+    }
+
 }

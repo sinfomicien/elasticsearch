@@ -34,7 +34,7 @@ import java.util.List;
 /**
  *
  */
-public class AnalyzeResponse implements ActionResponse, Iterable<AnalyzeResponse.AnalyzeToken>, ToXContent {
+public class AnalyzeResponse extends ActionResponse implements Iterable<AnalyzeResponse.AnalyzeToken>, ToXContent {
 
     public static class AnalyzeToken implements Streamable {
         private String term;
@@ -54,40 +54,20 @@ public class AnalyzeResponse implements ActionResponse, Iterable<AnalyzeResponse
             this.type = type;
         }
 
-        public String term() {
+        public String getTerm() {
             return this.term;
         }
 
-        public String getTerm() {
-            return term();
-        }
-
-        public int startOffset() {
+        public int getStartOffset() {
             return this.startOffset;
         }
 
-        public int getStartOffset() {
-            return startOffset();
-        }
-
-        public int endOffset() {
+        public int getEndOffset() {
             return this.endOffset;
         }
 
-        public int getEndOffset() {
-            return endOffset();
-        }
-
-        public int position() {
-            return this.position;
-        }
-
         public int getPosition() {
-            return position();
-        }
-
-        public String type() {
-            return this.type;
+            return this.position;
         }
 
         public String getType() {
@@ -102,27 +82,20 @@ public class AnalyzeResponse implements ActionResponse, Iterable<AnalyzeResponse
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
-            term = in.readUTF();
+            term = in.readString();
             startOffset = in.readInt();
             endOffset = in.readInt();
             position = in.readVInt();
-            if (in.readBoolean()) {
-                type = in.readUTF();
-            }
+            type = in.readOptionalString();
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
-            out.writeUTF(term);
+            out.writeString(term);
             out.writeInt(startOffset);
             out.writeInt(endOffset);
             out.writeVInt(position);
-            if (type == null) {
-                out.writeBoolean(false);
-            } else {
-                out.writeBoolean(true);
-                out.writeUTF(type);
-            }
+            out.writeOptionalString(type);
         }
     }
 
@@ -135,12 +108,8 @@ public class AnalyzeResponse implements ActionResponse, Iterable<AnalyzeResponse
         this.tokens = tokens;
     }
 
-    public List<AnalyzeToken> tokens() {
-        return this.tokens;
-    }
-
     public List<AnalyzeToken> getTokens() {
-        return tokens();
+        return this.tokens;
     }
 
     @Override
@@ -155,11 +124,11 @@ public class AnalyzeResponse implements ActionResponse, Iterable<AnalyzeResponse
             builder.startArray("tokens");
             for (AnalyzeToken token : tokens) {
                 builder.startObject();
-                builder.field("token", token.term());
-                builder.field("start_offset", token.startOffset());
-                builder.field("end_offset", token.endOffset());
-                builder.field("type", token.type());
-                builder.field("position", token.position());
+                builder.field("token", token.getTerm());
+                builder.field("start_offset", token.getStartOffset());
+                builder.field("end_offset", token.getEndOffset());
+                builder.field("type", token.getType());
+                builder.field("position", token.getPosition());
                 builder.endObject();
             }
             builder.endArray();
@@ -167,16 +136,16 @@ public class AnalyzeResponse implements ActionResponse, Iterable<AnalyzeResponse
             StringBuilder sb = new StringBuilder();
             int lastPosition = 0;
             for (AnalyzeToken token : tokens) {
-                if (lastPosition != token.position()) {
+                if (lastPosition != token.getPosition()) {
                     if (lastPosition != 0) {
-                        sb.append("\n").append(token.position()).append(": \n");
+                        sb.append("\n").append(token.getPosition()).append(": \n");
                     }
-                    lastPosition = token.position();
+                    lastPosition = token.getPosition();
                 }
                 sb.append('[')
-                        .append(token.term()).append(":")
-                        .append(token.startOffset()).append("->").append(token.endOffset()).append(":")
-                        .append(token.type())
+                        .append(token.getTerm()).append(":")
+                        .append(token.getStartOffset()).append("->").append(token.getEndOffset()).append(":")
+                        .append(token.getType())
                         .append("]\n");
             }
             builder.field("tokens", sb);
@@ -186,6 +155,7 @@ public class AnalyzeResponse implements ActionResponse, Iterable<AnalyzeResponse
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
+        super.readFrom(in);
         int size = in.readVInt();
         tokens = new ArrayList<AnalyzeToken>(size);
         for (int i = 0; i < size; i++) {
@@ -195,6 +165,7 @@ public class AnalyzeResponse implements ActionResponse, Iterable<AnalyzeResponse
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
+        super.writeTo(out);
         out.writeVInt(tokens.size());
         for (AnalyzeToken token : tokens) {
             token.writeTo(out);

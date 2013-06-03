@@ -26,15 +26,10 @@ import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
-import org.elasticsearch.common.io.stream.VoidStreamable;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.threadpool.ThreadPool;
-import org.elasticsearch.transport.BaseTransportRequestHandler;
-import org.elasticsearch.transport.TransportChannel;
-import org.elasticsearch.transport.TransportService;
-import org.elasticsearch.transport.VoidTransportResponseHandler;
+import org.elasticsearch.transport.*;
 
 import java.io.IOException;
 import java.util.List;
@@ -90,7 +85,7 @@ public class NodeAliasesUpdatedAction extends AbstractComponent {
             });
         } else {
             transportService.sendRequest(clusterService.state().nodes().masterNode(),
-                    NodeAliasesUpdatedTransportHandler.ACTION, response, VoidTransportResponseHandler.INSTANCE_SAME);
+                    NodeAliasesUpdatedTransportHandler.ACTION, response, EmptyTransportResponseHandler.INSTANCE_SAME);
         }
     }
 
@@ -119,7 +114,7 @@ public class NodeAliasesUpdatedAction extends AbstractComponent {
         @Override
         public void messageReceived(NodeAliasesUpdatedResponse response, TransportChannel channel) throws Exception {
             innerNodeAliasesUpdated(response);
-            channel.sendResponse(VoidStreamable.INSTANCE);
+            channel.sendResponse(TransportResponse.Empty.INSTANCE);
         }
 
         @Override
@@ -128,13 +123,12 @@ public class NodeAliasesUpdatedAction extends AbstractComponent {
         }
     }
 
-    public static class NodeAliasesUpdatedResponse implements Streamable {
+    public static class NodeAliasesUpdatedResponse extends TransportRequest {
 
         private String nodeId;
-
         private long version;
 
-        private NodeAliasesUpdatedResponse() {
+        NodeAliasesUpdatedResponse() {
         }
 
         public NodeAliasesUpdatedResponse(String nodeId, long version) {
@@ -152,13 +146,15 @@ public class NodeAliasesUpdatedAction extends AbstractComponent {
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
-            out.writeUTF(nodeId);
+            super.writeTo(out);
+            out.writeString(nodeId);
             out.writeLong(version);
         }
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
-            nodeId = in.readUTF();
+            super.readFrom(in);
+            nodeId = in.readString();
             version = in.readLong();
         }
     }

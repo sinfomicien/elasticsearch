@@ -20,21 +20,18 @@
 package org.elasticsearch.action.admin.cluster.node.stats;
 
 import org.elasticsearch.action.ActionListener;
-import org.elasticsearch.action.admin.cluster.support.BaseClusterRequestBuilder;
+import org.elasticsearch.action.admin.indices.stats.CommonStatsFlags;
+import org.elasticsearch.action.support.nodes.NodesOperationRequestBuilder;
 import org.elasticsearch.client.ClusterAdminClient;
+import org.elasticsearch.client.internal.InternalClusterAdminClient;
 
 /**
  *
  */
-public class NodesStatsRequestBuilder extends BaseClusterRequestBuilder<NodesStatsRequest, NodesStatsResponse> {
+public class NodesStatsRequestBuilder extends NodesOperationRequestBuilder<NodesStatsRequest, NodesStatsResponse, NodesStatsRequestBuilder> {
 
     public NodesStatsRequestBuilder(ClusterAdminClient clusterClient) {
-        super(clusterClient, new NodesStatsRequest());
-    }
-
-    public NodesStatsRequestBuilder setNodesIds(String... nodesIds) {
-        request.nodesIds(nodesIds);
-        return this;
+        super((InternalClusterAdminClient) clusterClient, new NodesStatsRequest());
     }
 
     /**
@@ -57,6 +54,14 @@ public class NodesStatsRequestBuilder extends BaseClusterRequestBuilder<NodesSta
      * Should the node indices stats be returned.
      */
     public NodesStatsRequestBuilder setIndices(boolean indices) {
+        request.indices(indices);
+        return this;
+    }
+
+    /**
+     * Should the node indices stats be returned.
+     */
+    public NodesStatsRequestBuilder setIndices(CommonStatsFlags indices) {
         request.indices(indices);
         return this;
     }
@@ -127,6 +132,6 @@ public class NodesStatsRequestBuilder extends BaseClusterRequestBuilder<NodesSta
 
     @Override
     protected void doExecute(ActionListener<NodesStatsResponse> listener) {
-        client.nodesStats(request, listener);
+        ((ClusterAdminClient) client).nodesStats(request, listener);
     }
 }

@@ -28,22 +28,23 @@ import java.io.IOException;
  */
 public class HasChildFilterBuilder extends BaseFilterBuilder {
 
+    private final FilterBuilder filterBuilder;
     private final QueryBuilder queryBuilder;
-
     private String childType;
-
-    private String scope;
-
     private String filterName;
+    private Boolean cache;
+    private String cacheKey;
 
     public HasChildFilterBuilder(String type, QueryBuilder queryBuilder) {
         this.childType = type;
         this.queryBuilder = queryBuilder;
+        this.filterBuilder = null;
     }
 
-    public HasChildFilterBuilder scope(String scope) {
-        this.scope = scope;
-        return this;
+    public HasChildFilterBuilder(String type, FilterBuilder filterBuilder) {
+        this.childType = type;
+        this.queryBuilder = null;
+        this.filterBuilder = filterBuilder;
     }
 
     /**
@@ -54,17 +55,42 @@ public class HasChildFilterBuilder extends BaseFilterBuilder {
         return this;
     }
 
+    /**
+     * Should the filter be cached or not. Defaults to <tt>false</tt>.
+     */
+    public HasChildFilterBuilder cache(boolean cache) {
+        this.cache = cache;
+        return this;
+    }
+
+    /**
+     * Defines what should be used as key to represent this filter in the filter cache.
+     * By default the filter itself is used as key.
+     */
+    public HasChildFilterBuilder cacheKey(String cacheKey) {
+        this.cacheKey = cacheKey;
+        return this;
+    }
+
     @Override
     protected void doXContent(XContentBuilder builder, Params params) throws IOException {
         builder.startObject(HasChildFilterParser.NAME);
-        builder.field("query");
-        queryBuilder.toXContent(builder, params);
-        builder.field("type", childType);
-        if (scope != null) {
-            builder.field("_scope", scope);
+        if (queryBuilder != null) {
+            builder.field("query");
+            queryBuilder.toXContent(builder, params);
+        } else if (filterBuilder != null) {
+            builder.field("filter");
+            filterBuilder.toXContent(builder, params);
         }
+        builder.field("child_type", childType);
         if (filterName != null) {
             builder.field("_name", filterName);
+        }
+        if (cache != null) {
+            builder.field("_cache", cache);
+        }
+        if (cacheKey != null) {
+            builder.field("_cache_key", cacheKey);
         }
         builder.endObject();
     }

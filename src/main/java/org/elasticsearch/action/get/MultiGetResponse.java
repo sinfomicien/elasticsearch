@@ -31,7 +31,7 @@ import org.elasticsearch.common.xcontent.XContentBuilderString;
 import java.io.IOException;
 import java.util.Iterator;
 
-public class MultiGetResponse implements ActionResponse, Iterable<MultiGetItemResponse>, ToXContent {
+public class MultiGetResponse extends ActionResponse implements Iterable<MultiGetItemResponse>, ToXContent {
 
     /**
      * Represents a failure.
@@ -56,57 +56,29 @@ public class MultiGetResponse implements ActionResponse, Iterable<MultiGetItemRe
         /**
          * The index name of the action.
          */
-        public String index() {
-            return this.index;
-        }
-
-        /**
-         * The index name of the action.
-         */
         public String getIndex() {
-            return index();
-        }
-
-        /**
-         * The type of the action.
-         */
-        public String type() {
-            return type;
+            return this.index;
         }
 
         /**
          * The type of the action.
          */
         public String getType() {
-            return type();
-        }
-
-        /**
-         * The id of the action.
-         */
-        public String id() {
-            return id;
+            return type;
         }
 
         /**
          * The id of the action.
          */
         public String getId() {
-            return this.id;
-        }
-
-        /**
-         * The failure message.
-         */
-        public String message() {
-            return this.message;
+            return id;
         }
 
         /**
          * The failure message.
          */
         public String getMessage() {
-            return message();
+            return this.message;
         }
 
         public static Failure readFailure(StreamInput in) throws IOException {
@@ -117,25 +89,18 @@ public class MultiGetResponse implements ActionResponse, Iterable<MultiGetItemRe
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
-            index = in.readUTF();
-            if (in.readBoolean()) {
-                type = in.readUTF();
-            }
-            id = in.readUTF();
-            message = in.readUTF();
+            index = in.readString();
+            type = in.readOptionalString();
+            id = in.readString();
+            message = in.readString();
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
-            out.writeUTF(index);
-            if (type == null) {
-                out.writeBoolean(false);
-            } else {
-                out.writeBoolean(true);
-                out.writeUTF(type);
-            }
-            out.writeUTF(id);
-            out.writeUTF(message);
+            out.writeString(index);
+            out.writeOptionalString(type);
+            out.writeString(id);
+            out.writeString(message);
         }
     }
 
@@ -148,7 +113,7 @@ public class MultiGetResponse implements ActionResponse, Iterable<MultiGetItemRe
         this.responses = responses;
     }
 
-    public MultiGetItemResponse[] responses() {
+    public MultiGetItemResponse[] getResponses() {
         return this.responses;
     }
 
@@ -162,13 +127,13 @@ public class MultiGetResponse implements ActionResponse, Iterable<MultiGetItemRe
         builder.startObject();
         builder.startArray(Fields.DOCS);
         for (MultiGetItemResponse response : responses) {
-            if (response.failed()) {
+            if (response.isFailed()) {
                 builder.startObject();
-                Failure failure = response.failure();
-                builder.field(Fields._INDEX, failure.index());
-                builder.field(Fields._TYPE, failure.type());
-                builder.field(Fields._ID, failure.id());
-                builder.field(Fields.ERROR, failure.message());
+                Failure failure = response.getFailure();
+                builder.field(Fields._INDEX, failure.getIndex());
+                builder.field(Fields._TYPE, failure.getType());
+                builder.field(Fields._ID, failure.getId());
+                builder.field(Fields.ERROR, failure.getMessage());
                 builder.endObject();
             } else {
                 GetResponse getResponse = response.getResponse();
@@ -190,6 +155,7 @@ public class MultiGetResponse implements ActionResponse, Iterable<MultiGetItemRe
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
+        super.readFrom(in);
         responses = new MultiGetItemResponse[in.readVInt()];
         for (int i = 0; i < responses.length; i++) {
             responses[i] = MultiGetItemResponse.readItemResponse(in);
@@ -198,6 +164,7 @@ public class MultiGetResponse implements ActionResponse, Iterable<MultiGetItemRe
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
+        super.writeTo(out);
         out.writeVInt(responses.length);
         for (MultiGetItemResponse response : responses) {
             response.writeTo(out);

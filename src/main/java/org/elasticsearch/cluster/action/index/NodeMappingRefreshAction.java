@@ -27,14 +27,9 @@ import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
-import org.elasticsearch.common.io.stream.VoidStreamable;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.threadpool.ThreadPool;
-import org.elasticsearch.transport.BaseTransportRequestHandler;
-import org.elasticsearch.transport.TransportChannel;
-import org.elasticsearch.transport.TransportService;
-import org.elasticsearch.transport.VoidTransportResponseHandler;
+import org.elasticsearch.transport.*;
 
 import java.io.IOException;
 
@@ -73,7 +68,7 @@ public class NodeMappingRefreshAction extends AbstractComponent {
             });
         } else {
             transportService.sendRequest(clusterService.state().nodes().masterNode(),
-                    NodeMappingRefreshTransportHandler.ACTION, request, VoidTransportResponseHandler.INSTANCE_SAME);
+                    NodeMappingRefreshTransportHandler.ACTION, request, EmptyTransportResponseHandler.INSTANCE_SAME);
         }
     }
 
@@ -93,7 +88,7 @@ public class NodeMappingRefreshAction extends AbstractComponent {
         @Override
         public void messageReceived(NodeMappingRefreshRequest request, TransportChannel channel) throws Exception {
             innerMappingRefresh(request);
-            channel.sendResponse(VoidStreamable.INSTANCE);
+            channel.sendResponse(TransportResponse.Empty.INSTANCE);
         }
 
         @Override
@@ -102,15 +97,13 @@ public class NodeMappingRefreshAction extends AbstractComponent {
         }
     }
 
-    public static class NodeMappingRefreshRequest implements Streamable {
+    public static class NodeMappingRefreshRequest extends TransportRequest {
 
         private String index;
-
         private String[] types;
-
         private String nodeId;
 
-        private NodeMappingRefreshRequest() {
+        NodeMappingRefreshRequest() {
         }
 
         public NodeMappingRefreshRequest(String index, String[] types, String nodeId) {
@@ -133,22 +126,18 @@ public class NodeMappingRefreshAction extends AbstractComponent {
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
-            out.writeUTF(index);
-            out.writeVInt(types.length);
-            for (String type : types) {
-                out.writeUTF(type);
-            }
-            out.writeUTF(nodeId);
+            super.writeTo(out);
+            out.writeString(index);
+            out.writeStringArray(types);
+            out.writeString(nodeId);
         }
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
-            index = in.readUTF();
-            types = new String[in.readVInt()];
-            for (int i = 0; i < types.length; i++) {
-                types[i] = in.readUTF();
-            }
-            nodeId = in.readUTF();
+            super.readFrom(in);
+            index = in.readString();
+            types = in.readStringArray();
+            nodeId = in.readString();
         }
     }
 }

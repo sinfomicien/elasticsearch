@@ -20,6 +20,8 @@
 package org.elasticsearch.search.facet.geodistance;
 
 import com.google.common.collect.ImmutableList;
+import org.elasticsearch.common.bytes.BytesReference;
+import org.elasticsearch.common.bytes.HashedBytesArray;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.xcontent.XContentBuilder;
@@ -34,9 +36,9 @@ import java.util.List;
 /**
  *
  */
-public class InternalGeoDistanceFacet implements GeoDistanceFacet, InternalFacet {
+public class InternalGeoDistanceFacet extends InternalFacet implements GeoDistanceFacet {
 
-    private static final String STREAM_TYPE = "geoDistance";
+    private static final BytesReference STREAM_TYPE = new HashedBytesArray("geoDistance");
 
     public static void registerStreams() {
         Streams.registerStream(STREAM, STREAM_TYPE);
@@ -44,17 +46,15 @@ public class InternalGeoDistanceFacet implements GeoDistanceFacet, InternalFacet
 
     static Stream STREAM = new Stream() {
         @Override
-        public Facet readFacet(String type, StreamInput in) throws IOException {
+        public Facet readFacet(StreamInput in) throws IOException {
             return readGeoDistanceFacet(in);
         }
     };
 
     @Override
-    public String streamType() {
+    public BytesReference streamType() {
         return STREAM_TYPE;
     }
-
-    private String name;
 
     Entry[] entries;
 
@@ -62,43 +62,48 @@ public class InternalGeoDistanceFacet implements GeoDistanceFacet, InternalFacet
     }
 
     public InternalGeoDistanceFacet(String name, Entry[] entries) {
-        this.name = name;
+        super(name);
         this.entries = entries;
     }
 
     @Override
-    public String name() {
-        return this.name;
-    }
-
-    @Override
-    public String getName() {
-        return name();
-    }
-
-    @Override
-    public String type() {
+    public String getType() {
         return TYPE;
     }
 
     @Override
-    public String getType() {
-        return type();
-    }
-
-    @Override
-    public List<Entry> entries() {
+    public List<Entry> getEntries() {
         return ImmutableList.copyOf(entries);
     }
 
     @Override
-    public List<Entry> getEntries() {
-        return entries();
+    public Iterator<Entry> iterator() {
+        return getEntries().iterator();
     }
 
     @Override
-    public Iterator<Entry> iterator() {
-        return entries().iterator();
+    public Facet reduce(List<Facet> facets) {
+        if (facets.size() == 1) {
+            return facets.get(0);
+        }
+        InternalGeoDistanceFacet agg = (InternalGeoDistanceFacet) facets.get(0);
+        for (int i = 1; i < facets.size(); i++) {
+            InternalGeoDistanceFacet geoDistanceFacet = (InternalGeoDistanceFacet) facets.get(i);
+            for (int j = 0; j < geoDistanceFacet.entries.length; j++) {
+                GeoDistanceFacet.Entry aggEntry = agg.entries[j];
+                GeoDistanceFacet.Entry currentEntry = geoDistanceFacet.entries[j];
+                aggEntry.count += currentEntry.count;
+                aggEntry.totalCount += currentEntry.totalCount;
+                aggEntry.total += currentEntry.total;
+                if (currentEntry.min < aggEntry.min) {
+                    aggEntry.min = currentEntry.min;
+                }
+                if (currentEntry.max > aggEntry.max) {
+                    aggEntry.max = currentEntry.max;
+                }
+            }
+        }
+        return agg;
     }
 
     public static InternalGeoDistanceFacet readGeoDistanceFacet(StreamInput in) throws IOException {
@@ -109,7 +114,7 @@ public class InternalGeoDistanceFacet implements GeoDistanceFacet, InternalFacet
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
-        name = in.readUTF();
+        super.readFrom(in);
         entries = new Entry[in.readVInt()];
         for (int i = 0; i < entries.length; i++) {
             entries[i] = new Entry(in.readDouble(), in.readDouble(), in.readVLong(), in.readVLong(), in.readDouble(), in.readDouble(), in.readDouble());
@@ -118,7 +123,7 @@ public class InternalGeoDistanceFacet implements GeoDistanceFacet, InternalFacet
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeUTF(name);
+        super.writeTo(out);
         out.writeVInt(entries.length);
         for (Entry entry : entries) {
             out.writeDouble(entry.from);
@@ -147,7 +152,7 @@ public class InternalGeoDistanceFacet implements GeoDistanceFacet, InternalFacet
 
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
-        builder.startObject(name);
+        builder.startObject(getName());
         builder.field(Fields._TYPE, GeoDistanceFacet.TYPE);
         builder.startArray(Fields.RANGES);
         for (Entry entry : entries) {
@@ -158,11 +163,12 @@ public class InternalGeoDistanceFacet implements GeoDistanceFacet, InternalFacet
             if (!Double.isInfinite(entry.to)) {
                 builder.field(Fields.TO, entry.to);
             }
-            builder.field(Fields.MIN, entry.min());
-            builder.field(Fields.MAX, entry.max());
-            builder.field(Fields.TOTAL_COUNT, entry.totalCount());
-            builder.field(Fields.TOTAL, entry.total());
-            builder.field(Fields.MEAN, entry.mean());
+            builder.field(Fields.COUNT, entry.getCount());
+            builder.field(Fields.MIN, entry.getMin());
+            builder.field(Fields.MAX, entry.getMax());
+            builder.field(Fields.TOTAL_COUNT, entry.getTotalCount());
+            builder.field(Fields.TOTAL, entry.getTotal());
+            builder.field(Fields.MEAN, entry.getMean());
             builder.endObject();
         }
         builder.endArray();

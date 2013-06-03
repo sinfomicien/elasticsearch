@@ -21,25 +21,13 @@ package org.elasticsearch.search.facet;
 
 /**
  * A search facet.
- *
- *
  */
 public interface Facet {
 
     /**
      * The "logical" name of the search facet.
      */
-    String name();
-
-    /**
-     * The "logical" name of the search facet.
-     */
     String getName();
-
-    /**
-     * The type of the facet.
-     */
-    String type();
 
     /**
      * The type of the facet.

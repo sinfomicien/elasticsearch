@@ -32,11 +32,10 @@ import static org.elasticsearch.cluster.ClusterState.newClusterStateBuilder;
 import static org.elasticsearch.cluster.metadata.IndexMetaData.newIndexMetaDataBuilder;
 import static org.elasticsearch.cluster.metadata.MetaData.newMetaDataBuilder;
 import static org.elasticsearch.cluster.node.DiscoveryNodes.newNodesBuilder;
-import static org.elasticsearch.cluster.routing.RoutingBuilders.indexRoutingTable;
 import static org.elasticsearch.cluster.routing.RoutingBuilders.routingTable;
 import static org.elasticsearch.cluster.routing.ShardRoutingState.*;
-import static org.elasticsearch.test.unit.cluster.routing.allocation.RoutingAllocationTests.newNode;
 import static org.elasticsearch.common.settings.ImmutableSettings.settingsBuilder;
+import static org.elasticsearch.test.unit.cluster.routing.allocation.RoutingAllocationTests.newNode;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
@@ -54,6 +53,9 @@ public class TenShardsOneReplicaRoutingTests {
                 .put("cluster.routing.allocation.node_initial_primaries_recoveries", 10)
                 .put("cluster.routing.allocation.allow_rebalance", "always")
                 .put("cluster.routing.allocation.cluster_concurrent_rebalance", -1)
+                .put("cluster.routing.allocation.balance.index", 0.0f)
+                .put("cluster.routing.allocation.balance.replica", 1.0f)
+                .put("cluster.routing.allocation.balance.primary", 0.0f)
                 .build());
 
         logger.info("Building initial routing table");
@@ -63,7 +65,7 @@ public class TenShardsOneReplicaRoutingTests {
                 .build();
 
         RoutingTable routingTable = routingTable()
-                .add(indexRoutingTable("test").initializeEmpty(metaData.index("test")))
+                .addAsNew(metaData.index("test"))
                 .build();
 
         ClusterState clusterState = newClusterStateBuilder().metaData(metaData).routingTable(routingTable).build();
@@ -174,8 +176,8 @@ public class TenShardsOneReplicaRoutingTests {
 
         assertThat(prevRoutingTable != routingTable, equalTo(true));
         assertThat(routingTable.index("test").shards().size(), equalTo(10));
-        assertThat(routingNodes.node("node1").numberOfShardsWithState(STARTED), equalTo(8));
-        assertThat(routingNodes.node("node2").numberOfShardsWithState(STARTED), equalTo(6));
+        assertThat(routingNodes.node("node1").numberOfShardsWithState(STARTED), equalTo(7));
+        assertThat(routingNodes.node("node2").numberOfShardsWithState(STARTED), equalTo(7));
         assertThat(routingNodes.node("node3").numberOfShardsWithState(STARTED), equalTo(6));
     }
 }

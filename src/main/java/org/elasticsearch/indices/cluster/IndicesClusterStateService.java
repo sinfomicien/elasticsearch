@@ -62,10 +62,13 @@ import org.elasticsearch.indices.recovery.RecoveryTarget;
 import org.elasticsearch.indices.recovery.StartRecoveryRequest;
 import org.elasticsearch.threadpool.ThreadPool;
 
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 
+import static com.google.common.collect.Maps.newHashMap;
 import static com.google.common.collect.Sets.newHashSet;
 import static org.elasticsearch.ExceptionsHelper.detailedMessage;
 
@@ -75,23 +78,14 @@ import static org.elasticsearch.ExceptionsHelper.detailedMessage;
 public class IndicesClusterStateService extends AbstractLifecycleComponent<IndicesClusterStateService> implements ClusterStateListener {
 
     private final IndicesService indicesService;
-
     private final ClusterService clusterService;
-
     private final ThreadPool threadPool;
-
     private final RecoveryTarget recoveryTarget;
-
     private final ShardStateAction shardStateAction;
-
     private final NodeIndexCreatedAction nodeIndexCreatedAction;
-
     private final NodeIndexDeletedAction nodeIndexDeletedAction;
-
     private final NodeMappingCreatedAction nodeMappingCreatedAction;
-
     private final NodeMappingRefreshAction nodeMappingRefreshAction;
-
     private final NodeAliasesUpdatedAction nodeAliasesUpdatedAction;
 
     // a map of mappings type we have seen per index due to cluster state
@@ -160,7 +154,7 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
                             logger.warn("[{}] failed to remove shard (disabled block persistence)", e, index);
                         }
                     }
-                    indicesService.cleanIndex(index, "cleaning index (disabled block persistence)");
+                    indicesService.removeIndex(index, "cleaning index (disabled block persistence)");
                 }
                 return;
             }
@@ -218,7 +212,7 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
                 }
                 // clean the index
                 try {
-                    indicesService.cleanIndex(index, "cleaning index (no shards allocated)");
+                    indicesService.removeIndex(index, "removing index (no shards allocated)");
                 } catch (Exception e) {
                     logger.warn("[{}] failed to clean index (no shards of that index are allocated on this node)", e, index);
                 }
@@ -233,7 +227,7 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
                     logger.debug("[{}] cleaning index, no longer part of the metadata", index);
                 }
                 try {
-                    indicesService.cleanIndex(index, "index no longer part of the metadata");
+                    indicesService.removeIndex(index, "index no longer part of the metadata");
                 } catch (Exception e) {
                     logger.warn("failed to clean index", e);
                 }
@@ -334,7 +328,11 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
             }
             List<String> typesToRefresh = null;
             String index = indexMetaData.index();
-            IndexService indexService = indicesService.indexServiceSafe(index);
+            IndexService indexService = indicesService.indexService(index);
+            if (indexService == null) {
+                // got deleted on us, ignore (closing the node)
+                return;
+            }
             MapperService mapperService = indexService.mapperService();
             // first, go over and update the _default_ mapping (if exists)
             if (indexMetaData.mappings().containsKey(MapperService.DEFAULT_MAPPING)) {
@@ -381,7 +379,8 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
                 if (logger.isDebugEnabled()) {
                     logger.debug("[{}] adding mapping [{}], source [{}]", index, mappingType, mappingSource.string());
                 }
-                mapperService.add(mappingType, mappingSource.string());
+                // we don't apply default, since it has been applied when the mappings were parsed initially
+                mapperService.merge(mappingType, mappingSource.string(), false);
                 if (!mapperService.documentMapper(mappingType).mappingSource().equals(mappingSource)) {
                     // this might happen when upgrading from 0.15 to 0.16
                     logger.debug("[{}] parsed mapping [{}], and got different sources\noriginal:\n{}\nparsed:\n{}", index, mappingType, mappingSource, mapperService.documentMapper(mappingType).mappingSource());
@@ -395,7 +394,8 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
                     if (logger.isDebugEnabled()) {
                         logger.debug("[{}] updating mapping [{}], source [{}]", index, mappingType, mappingSource.string());
                     }
-                    mapperService.add(mappingType, mappingSource.string());
+                    // we don't apply default, since it has been applied when the mappings were parsed initially
+                    mapperService.merge(mappingType, mappingSource.string(), false);
                     if (!mapperService.documentMapper(mappingType).mappingSource().equals(mappingSource)) {
                         requiresRefresh = true;
                         // this might happen when upgrading from 0.15 to 0.16
@@ -427,9 +427,7 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
                 String index = indexMetaData.index();
                 IndexService indexService = indicesService.indexService(index);
                 IndexAliasesService indexAliasesService = indexService.aliasesService();
-                for (AliasMetaData aliasesMd : indexMetaData.aliases().values()) {
-                    processAlias(index, aliasesMd.alias(), aliasesMd.filter(), indexAliasesService);
-                }
+                processAliases(index, indexMetaData.aliases().values(), indexAliasesService);
                 // go over and remove aliases
                 for (IndexAlias indexAlias : indexAliasesService) {
                     if (!indexMetaData.aliases().containsKey(indexAlias.alias())) {
@@ -444,26 +442,31 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
         }
     }
 
-    private void processAlias(String index, String alias, CompressedString filter, IndexAliasesService indexAliasesService) {
-        try {
-            if (!indexAliasesService.hasAlias(alias)) {
-                if (logger.isDebugEnabled()) {
-                    logger.debug("[{}] adding alias [{}], filter [{}]", index, alias, filter);
-                }
-                indexAliasesService.add(alias, filter);
-            } else {
-                if ((filter == null && indexAliasesService.alias(alias).filter() != null) ||
-                        (filter != null && !filter.equals(indexAliasesService.alias(alias).filter()))) {
+    private void processAliases(String index, Collection<AliasMetaData> aliases, IndexAliasesService indexAliasesService) {
+        HashMap<String, IndexAlias> newAliases = newHashMap();
+        for (AliasMetaData aliasMd : aliases) {
+            String alias = aliasMd.alias();
+            CompressedString filter = aliasMd.filter();
+            try {
+                if (!indexAliasesService.hasAlias(alias)) {
                     if (logger.isDebugEnabled()) {
-                        logger.debug("[{}] updating alias [{}], filter [{}]", index, alias, filter);
+                        logger.debug("[{}] adding alias [{}], filter [{}]", index, alias, filter);
                     }
-                    indexAliasesService.add(alias, filter);
+                    newAliases.put(alias, indexAliasesService.create(alias, filter));
+                } else {
+                    if ((filter == null && indexAliasesService.alias(alias).filter() != null) ||
+                            (filter != null && !filter.equals(indexAliasesService.alias(alias).filter()))) {
+                        if (logger.isDebugEnabled()) {
+                            logger.debug("[{}] updating alias [{}], filter [{}]", index, alias, filter);
+                        }
+                        newAliases.put(alias, indexAliasesService.create(alias, filter));
+                    }
                 }
+            } catch (Exception e) {
+                logger.warn("[{}] failed to add alias [{}], filter [{}]", e, index, alias, filter);
             }
-        } catch (Exception e) {
-            logger.warn("[{}] failed to add alias [{}], filter [{}]", e, index, alias, filter);
         }
-
+        indexAliasesService.addAll(newAliases);
     }
 
     private void applyNewOrUpdatedShards(final ClusterChangedEvent event) throws ElasticSearchException {
@@ -489,8 +492,8 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
 
             if (!indexService.hasShard(shardId) && shardRouting.started()) {
                 // the master thinks we are started, but we don't have this shard at all, mark it as failed
-                logger.warn("[{}][{}] master [{}] marked shard as started, but shard have not been created, mark shard as failed", shardRouting.index(), shardId, nodes.masterNode());
-                shardStateAction.shardFailed(shardRouting, "master " + nodes.masterNode() + " marked shard as started, but shard have not been created, mark shard as failed");
+                logger.warn("[{}][{}] master [{}] marked shard as started, but shard has not been created, mark shard as failed", shardRouting.index(), shardId, nodes.masterNode());
+                shardStateAction.shardFailed(shardRouting, "master " + nodes.masterNode() + " marked shard as started, but shard has not been created, mark shard as failed");
                 continue;
             }
 
@@ -523,7 +526,11 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
     }
 
     private void applyInitializingShard(final RoutingTable routingTable, final DiscoveryNodes nodes, final IndexShardRoutingTable indexShardRouting, final ShardRouting shardRouting) throws ElasticSearchException {
-        final IndexService indexService = indicesService.indexServiceSafe(shardRouting.index());
+        final IndexService indexService = indicesService.indexService(shardRouting.index());
+        if (indexService == null) {
+            // got deleted on us, ignore
+            return;
+        }
         final int shardId = shardRouting.id();
 
         if (indexService.hasShard(shardId)) {
@@ -553,24 +560,13 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
                 indexShard.engine().addFailedEngineListener(failedEngineHandler);
             } catch (IndexShardAlreadyExistsException e) {
                 // ignore this, the method call can happen several times
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 logger.warn("[{}][{}] failed to create shard", e, shardRouting.index(), shardRouting.id());
                 try {
                     indexService.removeShard(shardId, "failed to create [" + ExceptionsHelper.detailedMessage(e) + "]");
                 } catch (IndexShardMissingException e1) {
                     // ignore
-                } catch (Exception e1) {
-                    logger.warn("[{}][{}] failed to remove shard after failed creation", e1, shardRouting.index(), shardRouting.id());
-                }
-                shardStateAction.shardFailed(shardRouting, "Failed to create shard, message [" + detailedMessage(e) + "]");
-                return;
-            } catch (OutOfMemoryError e) {
-                logger.warn("[{}][{}] failed to create shard", e, shardRouting.index(), shardRouting.id());
-                try {
-                    indexService.removeShard(shardId, "failed to create [" + ExceptionsHelper.detailedMessage(e) + "]");
-                } catch (IndexShardMissingException e1) {
-                    // ignore
-                } catch (Exception e1) {
+                } catch (Throwable e1) {
                     logger.warn("[{}][{}] failed to remove shard after failed creation", e1, shardRouting.index(), shardRouting.id());
                 }
                 shardStateAction.shardFailed(shardRouting, "Failed to create shard, message [" + detailedMessage(e) + "]");
@@ -608,7 +604,7 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
             if (shardRouting.relocatingNodeId() == null) {
                 // we are the first primary, recover from the gateway
                 // if its post api allocation, the index should exists
-                boolean indexShouldExists = indexShardRouting.allocatedPostApi();
+                boolean indexShouldExists = indexShardRouting.primaryAllocatedPostApi();
                 IndexShardGatewayService shardGatewayService = indexService.shardInjector(shardId).getInstance(IndexShardGatewayService.class);
                 shardGatewayService.recover(indexShouldExists, new IndexShardGatewayService.RecoveryListener() {
                     @Override

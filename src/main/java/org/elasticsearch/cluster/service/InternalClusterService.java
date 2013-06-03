@@ -19,7 +19,6 @@
 
 package org.elasticsearch.cluster.service;
 
-import jsr166y.LinkedTransferQueue;
 import org.elasticsearch.ElasticSearchException;
 import org.elasticsearch.ElasticSearchIllegalStateException;
 import org.elasticsearch.cluster.*;
@@ -30,10 +29,14 @@ import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.routing.RoutingTable;
 import org.elasticsearch.cluster.routing.operation.OperationRouting;
+import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.component.AbstractLifecycleComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
+import org.elasticsearch.common.util.concurrent.ConcurrentCollections;
+import org.elasticsearch.common.util.concurrent.EsExecutors;
+import org.elasticsearch.common.util.concurrent.PrioritizedRunnable;
 import org.elasticsearch.discovery.Discovery;
 import org.elasticsearch.discovery.DiscoveryService;
 import org.elasticsearch.node.settings.NodeSettingsService;
@@ -43,12 +46,8 @@ import org.elasticsearch.transport.TransportService;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Queue;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
-import static java.util.concurrent.Executors.newSingleThreadExecutor;
 import static org.elasticsearch.cluster.ClusterState.Builder;
 import static org.elasticsearch.cluster.ClusterState.newClusterStateBuilder;
 import static org.elasticsearch.common.util.concurrent.EsExecutors.daemonThreadFactory;
@@ -75,8 +74,9 @@ public class InternalClusterService extends AbstractLifecycleComponent<ClusterSe
     private final List<ClusterStateListener> priorityClusterStateListeners = new CopyOnWriteArrayList<ClusterStateListener>();
     private final List<ClusterStateListener> clusterStateListeners = new CopyOnWriteArrayList<ClusterStateListener>();
     private final List<ClusterStateListener> lastClusterStateListeners = new CopyOnWriteArrayList<ClusterStateListener>();
+    private final LocalNodeMasterListeners localNodeMasterListeners;
 
-    private final Queue<NotifyTimeout> onGoingTimeouts = new LinkedTransferQueue<NotifyTimeout>();
+    private final Queue<NotifyTimeout> onGoingTimeouts = ConcurrentCollections.newQueue();
 
     private volatile ClusterState clusterState = newClusterStateBuilder().build();
 
@@ -97,6 +97,8 @@ public class InternalClusterService extends AbstractLifecycleComponent<ClusterSe
         this.nodeSettingsService.setClusterService(this);
 
         this.reconnectInterval = componentSettings.getAsTime("reconnect_interval", TimeValue.timeValueSeconds(10));
+
+        localNodeMasterListeners = new LocalNodeMasterListeners(threadPool);
     }
 
     public NodeSettingsService settingsService() {
@@ -112,8 +114,9 @@ public class InternalClusterService extends AbstractLifecycleComponent<ClusterSe
 
     @Override
     protected void doStart() throws ElasticSearchException {
+        add(localNodeMasterListeners);
         this.clusterState = newClusterStateBuilder().blocks(initialBlocks).build();
-        this.updateTasksExecutor = newSingleThreadExecutor(daemonThreadFactory(settings, "clusterService#updateTask"));
+        this.updateTasksExecutor = EsExecutors.newSinglePrioritizingThreadExecutor(daemonThreadFactory(settings, "clusterService#updateTask"));
         this.reconnectToNodes = threadPool.schedule(reconnectInterval, ThreadPool.Names.GENERIC, new ReconnectToNodes());
     }
 
@@ -130,6 +133,7 @@ public class InternalClusterService extends AbstractLifecycleComponent<ClusterSe
         } catch (InterruptedException e) {
             // ignore
         }
+        remove(localNodeMasterListeners);
     }
 
     @Override
@@ -175,29 +179,43 @@ public class InternalClusterService extends AbstractLifecycleComponent<ClusterSe
         }
     }
 
-    public void add(TimeValue timeout, final TimeoutClusterStateListener listener) {
+    @Override
+    public void add(LocalNodeMasterListener listener) {
+        localNodeMasterListeners.add(listener);
+    }
+
+    @Override
+    public void remove(LocalNodeMasterListener listener) {
+        localNodeMasterListeners.remove(listener);
+    }
+
+    public void add(final TimeValue timeout, final TimeoutClusterStateListener listener) {
         if (lifecycle.stoppedOrClosed()) {
             listener.onClose();
             return;
         }
-        NotifyTimeout notifyTimeout = new NotifyTimeout(listener, timeout);
-        notifyTimeout.future = threadPool.schedule(timeout, ThreadPool.Names.GENERIC, notifyTimeout);
-        onGoingTimeouts.add(notifyTimeout);
-        clusterStateListeners.add(listener);
         // call the post added notification on the same event thread
         updateTasksExecutor.execute(new Runnable() {
             @Override
             public void run() {
+                NotifyTimeout notifyTimeout = new NotifyTimeout(listener, timeout);
+                notifyTimeout.future = threadPool.schedule(timeout, ThreadPool.Names.GENERIC, notifyTimeout);
+                onGoingTimeouts.add(notifyTimeout);
+                clusterStateListeners.add(listener);
                 listener.postAdded();
             }
         });
     }
 
     public void submitStateUpdateTask(final String source, final ClusterStateUpdateTask updateTask) {
+        submitStateUpdateTask(source, Priority.NORMAL, updateTask);
+    }
+
+    public void submitStateUpdateTask(final String source, Priority priority, final ClusterStateUpdateTask updateTask) {
         if (!lifecycle.started()) {
             return;
         }
-        updateTasksExecutor.execute(new Runnable() {
+        updateTasksExecutor.execute(new PrioritizedRunnable(priority) {
             @Override
             public void run() {
                 if (!lifecycle.started()) {
@@ -363,6 +381,9 @@ public class InternalClusterService extends AbstractLifecycleComponent<ClusterSe
     }
 
     private class ReconnectToNodes implements Runnable {
+
+        private ConcurrentMap<DiscoveryNode, Integer> failureCount = ConcurrentCollections.newConcurrentMap();
+
         @Override
         public void run() {
             // master node will check against all nodes if its alive with certain discoveries implementations,
@@ -383,10 +404,30 @@ public class InternalClusterService extends AbstractLifecycleComponent<ClusterSe
                                 return;
                             }
                             if (clusterState.nodes().nodeExists(node.id())) { // double check here as well, maybe its gone?
-                                logger.warn("failed to reconnect to node {}", e, node);
+                                Integer nodeFailureCount = failureCount.get(node);
+                                if (nodeFailureCount == null) {
+                                    nodeFailureCount = 1;
+                                } else {
+                                    nodeFailureCount = nodeFailureCount + 1;
+                                }
+                                // log every 6th failure
+                                if ((nodeFailureCount % 6) == 0) {
+                                    // reset the failure count...
+                                    nodeFailureCount = 0;
+                                    logger.warn("failed to reconnect to node {}", e, node);
+                                }
+                                failureCount.put(node, nodeFailureCount);
                             }
                         }
                     }
+                }
+            }
+            // go over and remove failed nodes that have been removed
+            DiscoveryNodes nodes = clusterState.nodes();
+            for (Iterator<DiscoveryNode> failedNodesIt = failureCount.keySet().iterator(); failedNodesIt.hasNext(); ) {
+                DiscoveryNode failedNode = failedNodesIt.next();
+                if (!nodes.nodeExists(failedNode.id())) {
+                    failedNodesIt.remove();
                 }
             }
             if (lifecycle.started()) {
@@ -397,5 +438,76 @@ public class InternalClusterService extends AbstractLifecycleComponent<ClusterSe
 
     private boolean nodeRequiresConnection(DiscoveryNode node) {
         return localNode().shouldConnectTo(node);
+    }
+
+    private static class LocalNodeMasterListeners implements ClusterStateListener {
+
+        private final List<LocalNodeMasterListener> listeners = new CopyOnWriteArrayList<LocalNodeMasterListener>();
+        private final ThreadPool threadPool;
+        private volatile boolean master = false;
+
+        private LocalNodeMasterListeners(ThreadPool threadPool) {
+            this.threadPool = threadPool;
+        }
+
+        @Override
+        public void clusterChanged(ClusterChangedEvent event) {
+            if (!master && event.localNodeMaster()) {
+                master = true;
+                for (LocalNodeMasterListener listener : listeners) {
+                    Executor executor = threadPool.executor(listener.executorName());
+                    executor.execute(new OnMasterRunnable(listener));
+                }
+                return;
+            }
+
+            if (master && !event.localNodeMaster()) {
+                master = false;
+                for (LocalNodeMasterListener listener : listeners) {
+                    Executor executor = threadPool.executor(listener.executorName());
+                    executor.execute(new OffMasterRunnable(listener));
+                }
+            }
+        }
+
+        private void add(LocalNodeMasterListener listener) {
+            listeners.add(listener);
+        }
+
+        private void remove(LocalNodeMasterListener listener) {
+            listeners.remove(listener);
+        }
+
+        private void clear() {
+            listeners.clear();
+        }
+    }
+
+    private static class OnMasterRunnable implements Runnable {
+
+        private final LocalNodeMasterListener listener;
+
+        private OnMasterRunnable(LocalNodeMasterListener listener) {
+            this.listener = listener;
+        }
+
+        @Override
+        public void run() {
+            listener.onMaster();
+        }
+    }
+
+    private static class OffMasterRunnable implements Runnable {
+
+        private final LocalNodeMasterListener listener;
+
+        private OffMasterRunnable(LocalNodeMasterListener listener) {
+            this.listener = listener;
+        }
+
+        @Override
+        public void run() {
+            listener.offMaster();
+        }
     }
 }

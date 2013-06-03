@@ -20,7 +20,6 @@
 package org.elasticsearch.cluster.metadata;
 
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
 import org.elasticsearch.ElasticSearchIllegalArgumentException;
 import org.elasticsearch.ElasticSearchIllegalStateException;
 import org.elasticsearch.cluster.block.ClusterBlock;
@@ -32,7 +31,6 @@ import org.elasticsearch.common.collect.MapBuilder;
 import org.elasticsearch.common.compress.CompressedString;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.regex.Regex;
 import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.settings.loader.SettingsLoader;
@@ -45,8 +43,12 @@ import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.search.warmer.IndexWarmersMetaData;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
 
+import static org.elasticsearch.cluster.node.DiscoveryNodeFilters.OpType.AND;
+import static org.elasticsearch.cluster.node.DiscoveryNodeFilters.OpType.OR;
 import static org.elasticsearch.common.settings.ImmutableSettings.*;
 
 /**
@@ -107,38 +109,10 @@ public class IndexMetaData {
         return factory;
     }
 
-    private static ImmutableSet<String> dynamicSettings = ImmutableSet.<String>builder()
-            .add(IndexMetaData.SETTING_NUMBER_OF_REPLICAS)
-            .add(IndexMetaData.SETTING_AUTO_EXPAND_REPLICAS)
-            .add(IndexMetaData.SETTING_READ_ONLY)
-            .add(IndexMetaData.SETTING_BLOCKS_READ)
-            .add(IndexMetaData.SETTING_BLOCKS_WRITE)
-            .add(IndexMetaData.SETTING_BLOCKS_METADATA)
-            .build();
-
     public static final ClusterBlock INDEX_READ_ONLY_BLOCK = new ClusterBlock(5, "index read-only (api)", false, false, RestStatus.FORBIDDEN, ClusterBlockLevel.WRITE, ClusterBlockLevel.METADATA);
     public static final ClusterBlock INDEX_READ_BLOCK = new ClusterBlock(7, "index read (api)", false, false, RestStatus.FORBIDDEN, ClusterBlockLevel.READ);
     public static final ClusterBlock INDEX_WRITE_BLOCK = new ClusterBlock(8, "index write (api)", false, false, RestStatus.FORBIDDEN, ClusterBlockLevel.WRITE);
     public static final ClusterBlock INDEX_METADATA_BLOCK = new ClusterBlock(9, "index metadata (api)", false, false, RestStatus.FORBIDDEN, ClusterBlockLevel.METADATA);
-
-    public static ImmutableSet<String> dynamicSettings() {
-        return dynamicSettings;
-    }
-
-    public static boolean hasDynamicSetting(String key) {
-        for (String dynamicSetting : dynamicSettings) {
-            if (Regex.simpleMatch(dynamicSetting, key)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    public static synchronized void addDynamicSettings(String... settings) {
-        HashSet<String> updatedSettings = new HashSet<String>(dynamicSettings);
-        updatedSettings.addAll(Arrays.asList(settings));
-        dynamicSettings = ImmutableSet.copyOf(updatedSettings);
-    }
 
     public static enum State {
         OPEN((byte) 0),
@@ -197,6 +171,7 @@ public class IndexMetaData {
 
     private transient final int totalNumberOfShards;
 
+    private final DiscoveryNodeFilters requireFilters;
     private final DiscoveryNodeFilters includeFilters;
     private final DiscoveryNodeFilters excludeFilters;
 
@@ -213,17 +188,23 @@ public class IndexMetaData {
 
         this.aliases = aliases;
 
+        ImmutableMap<String, String> requireMap = settings.getByPrefix("index.routing.allocation.require.").getAsMap();
+        if (requireMap.isEmpty()) {
+            requireFilters = null;
+        } else {
+            requireFilters = DiscoveryNodeFilters.buildFromKeyValue(AND, requireMap);
+        }
         ImmutableMap<String, String> includeMap = settings.getByPrefix("index.routing.allocation.include.").getAsMap();
         if (includeMap.isEmpty()) {
             includeFilters = null;
         } else {
-            includeFilters = DiscoveryNodeFilters.buildFromKeyValue(includeMap);
+            includeFilters = DiscoveryNodeFilters.buildFromKeyValue(OR, includeMap);
         }
         ImmutableMap<String, String> excludeMap = settings.getByPrefix("index.routing.allocation.exclude.").getAsMap();
         if (excludeMap.isEmpty()) {
             excludeFilters = null;
         } else {
-            excludeFilters = DiscoveryNodeFilters.buildFromKeyValue(excludeMap);
+            excludeFilters = DiscoveryNodeFilters.buildFromKeyValue(OR, excludeMap);
         }
     }
 
@@ -333,6 +314,11 @@ public class IndexMetaData {
     }
 
     @Nullable
+    public DiscoveryNodeFilters requireFilters() {
+        return requireFilters;
+    }
+
+    @Nullable
     public DiscoveryNodeFilters includeFilters() {
         return includeFilters;
     }
@@ -414,7 +400,7 @@ public class IndexMetaData {
             return index;
         }
 
-        public Builder index(String name) {
+        public Builder index(String index) {
             this.index = index;
             return this;
         }
@@ -646,7 +632,7 @@ public class IndexMetaData {
         }
 
         public static IndexMetaData readFrom(StreamInput in) throws IOException {
-            Builder builder = new Builder(in.readUTF());
+            Builder builder = new Builder(in.readString());
             builder.version(in.readLong());
             builder.state(State.fromId(in.readByte()));
             builder.settings(readSettingsFromStream(in));
@@ -662,7 +648,7 @@ public class IndexMetaData {
             }
             int customSize = in.readVInt();
             for (int i = 0; i < customSize; i++) {
-                String type = in.readUTF();
+                String type = in.readString();
                 Custom customIndexMetaData = lookupFactorySafe(type).readFrom(in);
                 builder.putCustom(type, customIndexMetaData);
             }
@@ -670,7 +656,7 @@ public class IndexMetaData {
         }
 
         public static void writeTo(IndexMetaData indexMetaData, StreamOutput out) throws IOException {
-            out.writeUTF(indexMetaData.index());
+            out.writeString(indexMetaData.index());
             out.writeLong(indexMetaData.version());
             out.writeByte(indexMetaData.state().id());
             writeSettingsToStream(indexMetaData.settings(), out);
@@ -684,7 +670,7 @@ public class IndexMetaData {
             }
             out.writeVInt(indexMetaData.customs().size());
             for (Map.Entry<String, Custom> entry : indexMetaData.customs().entrySet()) {
-                out.writeUTF(entry.getKey());
+                out.writeString(entry.getKey());
                 lookupFactorySafe(entry.getKey()).writeTo(entry.getValue(), out);
             }
         }

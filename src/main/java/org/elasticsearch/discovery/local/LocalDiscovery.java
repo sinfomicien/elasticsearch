@@ -19,7 +19,6 @@
 
 package org.elasticsearch.discovery.local;
 
-import jsr166y.LinkedTransferQueue;
 import org.elasticsearch.ElasticSearchException;
 import org.elasticsearch.ElasticSearchIllegalStateException;
 import org.elasticsearch.cluster.*;
@@ -27,6 +26,8 @@ import org.elasticsearch.cluster.block.ClusterBlocks;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodeService;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
+import org.elasticsearch.cluster.routing.allocation.AllocationService;
+import org.elasticsearch.cluster.routing.allocation.RoutingAllocation;
 import org.elasticsearch.common.component.AbstractLifecycleComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.inject.internal.Nullable;
@@ -39,7 +40,6 @@ import org.elasticsearch.transport.TransportService;
 
 import java.util.Queue;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -59,6 +59,8 @@ public class LocalDiscovery extends AbstractLifecycleComponent<Discovery> implem
     private final ClusterService clusterService;
 
     private final DiscoveryNodeService discoveryNodeService;
+
+    private AllocationService allocationService;
 
     private final ClusterName clusterName;
 
@@ -88,6 +90,11 @@ public class LocalDiscovery extends AbstractLifecycleComponent<Discovery> implem
     @Override
     public void setNodeService(@Nullable NodeService nodeService) {
         // nothing to do here
+    }
+
+    @Override
+    public void setAllocationService(AllocationService allocationService) {
+        this.allocationService = allocationService;
     }
 
     @Override
@@ -211,7 +218,10 @@ public class LocalDiscovery extends AbstractLifecycleComponent<Discovery> implem
                         if (delta.added()) {
                             logger.warn("No new nodes should be created when a new discovery view is accepted");
                         }
-                        return newClusterStateBuilder().state(currentState).nodes(newNodes).build();
+                        // reroute here, so we eagerly remove dead nodes from the routing
+                        ClusterState updatedState = newClusterStateBuilder().state(currentState).nodes(newNodes).build();
+                        RoutingAllocation.Result routingResult = master.allocationService.reroute(newClusterStateBuilder().state(updatedState).build());
+                        return newClusterStateBuilder().state(updatedState).routingResult(routingResult).build();
                     }
                 });
             }
@@ -300,7 +310,7 @@ public class LocalDiscovery extends AbstractLifecycleComponent<Discovery> implem
 
     private class ClusterGroup {
 
-        private Queue<LocalDiscovery> members = new LinkedTransferQueue<LocalDiscovery>();
+        private Queue<LocalDiscovery> members = ConcurrentCollections.newQueue();
 
         Queue<LocalDiscovery> members() {
             return members;

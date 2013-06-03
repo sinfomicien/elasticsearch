@@ -26,13 +26,14 @@ import org.elasticsearch.action.admin.cluster.node.shutdown.NodesShutdownRequest
 import org.elasticsearch.action.admin.cluster.node.stats.NodesStatsRequest;
 import org.elasticsearch.action.admin.cluster.reroute.ClusterRerouteRequest;
 import org.elasticsearch.action.admin.cluster.settings.ClusterUpdateSettingsRequest;
+import org.elasticsearch.action.admin.cluster.shards.ClusterSearchShardsRequest;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateRequest;
 import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequest;
 import org.elasticsearch.action.admin.indices.cache.clear.ClearIndicesCacheRequest;
 import org.elasticsearch.action.admin.indices.close.CloseIndexRequest;
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequest;
 import org.elasticsearch.action.admin.indices.delete.DeleteIndexRequest;
-import org.elasticsearch.action.admin.indices.exists.IndicesExistsRequest;
+import org.elasticsearch.action.admin.indices.exists.indices.IndicesExistsRequest;
 import org.elasticsearch.action.admin.indices.flush.FlushRequest;
 import org.elasticsearch.action.admin.indices.gateway.snapshot.GatewaySnapshotRequest;
 import org.elasticsearch.action.admin.indices.mapping.delete.DeleteMappingRequest;
@@ -195,7 +196,7 @@ public class Requests {
      *
      * @param indices The indices to check if they exists or not.
      * @return The indices exists request
-     * @see org.elasticsearch.client.IndicesAdminClient#exists(org.elasticsearch.action.admin.indices.exists.IndicesExistsRequest)
+     * @see org.elasticsearch.client.IndicesAdminClient#exists(org.elasticsearch.action.admin.indices.exists.indices.IndicesExistsRequest)
      */
     public static IndicesExistsRequest indicesExistsRequest(String... indices) {
         return new IndicesExistsRequest(indices);
@@ -370,6 +371,20 @@ public class Requests {
     }
 
     /**
+     * List all shards for the give search
+     */
+    public static ClusterSearchShardsRequest clusterSearchShardsRequest() {
+        return new ClusterSearchShardsRequest();
+    }
+
+    /**
+     * List all shards for the give search
+     */
+    public static ClusterSearchShardsRequest clusterSearchShardsRequest(String... indices) {
+        return new ClusterSearchShardsRequest(indices);
+    }
+
+    /**
      * Creates a nodes info request against all the nodes.
      *
      * @return The nodes info request
@@ -436,4 +451,5 @@ public class Requests {
     public static NodesRestartRequest nodesRestartRequest(String... nodesIds) {
         return new NodesRestartRequest(nodesIds);
     }
+
 }

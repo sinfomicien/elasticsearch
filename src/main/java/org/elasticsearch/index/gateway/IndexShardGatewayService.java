@@ -19,7 +19,6 @@
 
 package org.elasticsearch.index.gateway;
 
-import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.ByteSizeValue;
@@ -92,14 +91,12 @@ public class IndexShardGatewayService extends AbstractIndexShardComponent implem
         indexSettingsService.addListener(applySettings);
     }
 
-    static {
-        IndexMetaData.addDynamicSettings("index.gateway.snapshot_interval");
-    }
+    public static final String INDEX_GATEWAY_SNAPSHOT_INTERVAL = "index.gateway.snapshot_interval";
 
     class ApplySettings implements IndexSettingsService.Listener {
         @Override
         public void onRefreshSettings(Settings settings) {
-            TimeValue snapshotInterval = settings.getAsTime("index.gateway.snapshot_interval", IndexShardGatewayService.this.snapshotInterval);
+            TimeValue snapshotInterval = settings.getAsTime(INDEX_GATEWAY_SNAPSHOT_INTERVAL, IndexShardGatewayService.this.snapshotInterval);
             if (!snapshotInterval.equals(IndexShardGatewayService.this.snapshotInterval)) {
                 logger.info("updating snapshot_interval from [{}] to [{}]", IndexShardGatewayService.this.snapshotInterval, snapshotInterval);
                 IndexShardGatewayService.this.snapshotInterval = snapshotInterval;
@@ -265,13 +262,13 @@ public class IndexShardGatewayService extends AbstractIndexShardComponent implem
             SnapshotStatus snapshotStatus = indexShard.snapshot(new Engine.SnapshotHandler<SnapshotStatus>() {
                 @Override
                 public SnapshotStatus snapshot(SnapshotIndexCommit snapshotIndexCommit, Translog.Snapshot translogSnapshot) throws EngineException {
-                    if (lastIndexVersion != snapshotIndexCommit.getVersion() || lastTranslogId != translogSnapshot.translogId() || lastTranslogLength < translogSnapshot.length()) {
+                    if (lastIndexVersion != snapshotIndexCommit.getGeneration() || lastTranslogId != translogSnapshot.translogId() || lastTranslogLength < translogSnapshot.length()) {
 
                         logger.debug("snapshot ({}) to {} ...", reason, shardGateway);
                         SnapshotStatus snapshotStatus =
                                 shardGateway.snapshot(new IndexShardGateway.Snapshot(snapshotIndexCommit, translogSnapshot, lastIndexVersion, lastTranslogId, lastTranslogLength, lastTotalTranslogOperations));
 
-                        lastIndexVersion = snapshotIndexCommit.getVersion();
+                        lastIndexVersion = snapshotIndexCommit.getGeneration();
                         lastTranslogId = translogSnapshot.translogId();
                         lastTranslogLength = translogSnapshot.length();
                         lastTotalTranslogOperations = translogSnapshot.estimatedTotalOperations();
@@ -314,18 +311,14 @@ public class IndexShardGatewayService extends AbstractIndexShardComponent implem
         }
     }
 
-    public synchronized void close(boolean delete) {
+    @Override
+    public synchronized void close() {
         indexSettingsService.removeListener(applySettings);
         if (snapshotScheduleFuture != null) {
             snapshotScheduleFuture.cancel(true);
             snapshotScheduleFuture = null;
         }
-        // don't really delete the shard gateway if we are *not* primary,
-        // the primary will close it
-        if (!indexShard.routingEntry().primary()) {
-            delete = false;
-        }
-        shardGateway.close(delete);
+        shardGateway.close();
         if (snapshotLock != null) {
             snapshotLock.release();
         }

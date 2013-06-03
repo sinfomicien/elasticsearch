@@ -31,6 +31,7 @@ import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.search.SearchHits;
 import org.elasticsearch.search.facet.Facets;
 import org.elasticsearch.search.internal.InternalSearchResponse;
+import org.elasticsearch.search.suggest.Suggest;
 
 import java.io.IOException;
 
@@ -40,7 +41,7 @@ import static org.elasticsearch.search.internal.InternalSearchResponse.readInter
 /**
  * A response of a search request.
  */
-public class SearchResponse implements ActionResponse, ToXContent {
+public class SearchResponse extends ActionResponse implements ToXContent {
 
     private InternalSearchResponse internalResponse;
 
@@ -87,78 +88,40 @@ public class SearchResponse implements ActionResponse, ToXContent {
     /**
      * The search hits.
      */
-    public SearchHits hits() {
-        return internalResponse.hits();
-    }
-
-    /**
-     * The search hits.
-     */
     public SearchHits getHits() {
-        return hits();
-    }
-
-    /**
-     * The search facets.
-     */
-    public Facets facets() {
-        return internalResponse.facets();
+        return internalResponse.hits();
     }
 
     /**
      * The search facets.
      */
     public Facets getFacets() {
-        return facets();
+        return internalResponse.facets();
     }
 
-    /**
-     * Has the search operation timed out.
-     */
-    public boolean timedOut() {
-        return internalResponse.timedOut();
+    public Suggest getSuggest() {
+        return internalResponse.suggest();
     }
 
     /**
      * Has the search operation timed out.
      */
     public boolean isTimedOut() {
-        return timedOut();
-    }
-
-    /**
-     * How long the search took.
-     */
-    public TimeValue took() {
-        return new TimeValue(tookInMillis);
+        return internalResponse.timedOut();
     }
 
     /**
      * How long the search took.
      */
     public TimeValue getTook() {
-        return took();
-    }
-
-    /**
-     * How long the search took in milliseconds.
-     */
-    public long tookInMillis() {
-        return tookInMillis;
+        return new TimeValue(tookInMillis);
     }
 
     /**
      * How long the search took in milliseconds.
      */
     public long getTookInMillis() {
-        return tookInMillis();
-    }
-
-    /**
-     * The total number of shards the search was executed on.
-     */
-    public int totalShards() {
-        return totalShards;
+        return tookInMillis;
     }
 
     /**
@@ -171,13 +134,6 @@ public class SearchResponse implements ActionResponse, ToXContent {
     /**
      * The successful number of shards the search was executed on.
      */
-    public int successfulShards() {
-        return successfulShards;
-    }
-
-    /**
-     * The successful number of shards the search was executed on.
-     */
     public int getSuccessfulShards() {
         return successfulShards;
     }
@@ -185,37 +141,15 @@ public class SearchResponse implements ActionResponse, ToXContent {
     /**
      * The failed number of shards the search was executed on.
      */
-    public int failedShards() {
-        return totalShards - successfulShards;
-    }
-
-    /**
-     * The failed number of shards the search was executed on.
-     */
     public int getFailedShards() {
-        return failedShards();
-    }
-
-    /**
-     * The failures that occurred during the search.
-     */
-    public ShardSearchFailure[] shardFailures() {
-        return this.shardFailures;
+        return totalShards - successfulShards;
     }
 
     /**
      * The failures that occurred during the search.
      */
     public ShardSearchFailure[] getShardFailures() {
-        return shardFailures;
-    }
-
-    /**
-     * If scrolling was enabled ({@link SearchRequest#scroll(org.elasticsearch.search.Scroll)}, the
-     * scroll id that can be used to continue scrolling.
-     */
-    public String scrollId() {
-        return scrollId;
+        return this.shardFailures;
     }
 
     /**
@@ -247,11 +181,11 @@ public class SearchResponse implements ActionResponse, ToXContent {
             builder.field(Fields._SCROLL_ID, scrollId);
         }
         builder.field(Fields.TOOK, tookInMillis);
-        builder.field(Fields.TIMED_OUT, timedOut());
+        builder.field(Fields.TIMED_OUT, isTimedOut());
         builder.startObject(Fields._SHARDS);
-        builder.field(Fields.TOTAL, totalShards());
-        builder.field(Fields.SUCCESSFUL, successfulShards());
-        builder.field(Fields.FAILED, failedShards());
+        builder.field(Fields.TOTAL, getTotalShards());
+        builder.field(Fields.SUCCESSFUL, getSuccessfulShards());
+        builder.field(Fields.FAILED, getFailedShards());
 
         if (shardFailures.length > 0) {
             builder.startArray(Fields.FAILURES);
@@ -281,6 +215,7 @@ public class SearchResponse implements ActionResponse, ToXContent {
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
+        super.readFrom(in);
         internalResponse = readInternalSearchResponse(in);
         totalShards = in.readVInt();
         successfulShards = in.readVInt();
@@ -293,14 +228,13 @@ public class SearchResponse implements ActionResponse, ToXContent {
                 shardFailures[i] = readShardSearchFailure(in);
             }
         }
-        if (in.readBoolean()) {
-            scrollId = in.readUTF();
-        }
+        scrollId = in.readOptionalString();
         tookInMillis = in.readVLong();
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
+        super.writeTo(out);
         internalResponse.writeTo(out);
         out.writeVInt(totalShards);
         out.writeVInt(successfulShards);
@@ -310,12 +244,7 @@ public class SearchResponse implements ActionResponse, ToXContent {
             shardSearchFailure.writeTo(out);
         }
 
-        if (scrollId == null) {
-            out.writeBoolean(false);
-        } else {
-            out.writeBoolean(true);
-            out.writeUTF(scrollId);
-        }
+        out.writeOptionalString(scrollId);
         out.writeVLong(tookInMillis);
     }
 

@@ -23,7 +23,6 @@ import com.google.common.collect.ImmutableList;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -32,20 +31,15 @@ import java.util.List;
 /**
  * A response of an index operation,
  *
- *
  * @see org.elasticsearch.action.index.IndexRequest
  * @see org.elasticsearch.client.Client#index(IndexRequest)
  */
-public class IndexResponse implements ActionResponse, Streamable {
+public class IndexResponse extends ActionResponse {
 
     private String index;
-
     private String id;
-
     private String type;
-
     private long version;
-
     private List<String> matches;
 
     public IndexResponse() {
@@ -62,64 +56,29 @@ public class IndexResponse implements ActionResponse, Streamable {
     /**
      * The index the document was indexed into.
      */
-    public String index() {
-        return this.index;
-    }
-
-    /**
-     * The index the document was indexed into.
-     */
     public String getIndex() {
-        return index;
-    }
-
-    /**
-     * The type of the document indexed.
-     */
-    public String type() {
-        return this.type;
+        return this.index;
     }
 
     /**
      * The type of the document indexed.
      */
     public String getType() {
-        return type;
-    }
-
-    /**
-     * The id of the document indexed.
-     */
-    public String id() {
-        return this.id;
+        return this.type;
     }
 
     /**
      * The id of the document indexed.
      */
     public String getId() {
-        return id;
-    }
-
-    /**
-     * Returns the version of the doc indexed.
-     */
-    public long version() {
-        return this.version;
+        return this.id;
     }
 
     /**
      * Returns the version of the doc indexed.
      */
     public long getVersion() {
-        return version();
-    }
-
-    /**
-     * Returns the percolate queries matches. <tt>null</tt> if no percolation was requested.
-     */
-    public List<String> matches() {
-        return this.matches;
+        return this.version;
     }
 
     /**
@@ -132,34 +91,35 @@ public class IndexResponse implements ActionResponse, Streamable {
     /**
      * Internal.
      */
-    public void matches(List<String> matches) {
+    public void setMatches(List<String> matches) {
         this.matches = matches;
     }
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
-        index = in.readUTF();
-        id = in.readUTF();
-        type = in.readUTF();
+        super.readFrom(in);
+        index = in.readString();
+        id = in.readString();
+        type = in.readString();
         version = in.readLong();
         if (in.readBoolean()) {
             int size = in.readVInt();
             if (size == 0) {
                 matches = ImmutableList.of();
             } else if (size == 1) {
-                matches = ImmutableList.of(in.readUTF());
+                matches = ImmutableList.of(in.readString());
             } else if (size == 2) {
-                matches = ImmutableList.of(in.readUTF(), in.readUTF());
+                matches = ImmutableList.of(in.readString(), in.readString());
             } else if (size == 3) {
-                matches = ImmutableList.of(in.readUTF(), in.readUTF(), in.readUTF());
+                matches = ImmutableList.of(in.readString(), in.readString(), in.readString());
             } else if (size == 4) {
-                matches = ImmutableList.of(in.readUTF(), in.readUTF(), in.readUTF(), in.readUTF());
+                matches = ImmutableList.of(in.readString(), in.readString(), in.readString(), in.readString());
             } else if (size == 5) {
-                matches = ImmutableList.of(in.readUTF(), in.readUTF(), in.readUTF(), in.readUTF(), in.readUTF());
+                matches = ImmutableList.of(in.readString(), in.readString(), in.readString(), in.readString(), in.readString());
             } else {
                 matches = new ArrayList<String>();
                 for (int i = 0; i < size; i++) {
-                    matches.add(in.readUTF());
+                    matches.add(in.readString());
                 }
             }
         }
@@ -167,9 +127,10 @@ public class IndexResponse implements ActionResponse, Streamable {
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeUTF(index);
-        out.writeUTF(id);
-        out.writeUTF(type);
+        super.writeTo(out);
+        out.writeString(index);
+        out.writeString(id);
+        out.writeString(type);
         out.writeLong(version);
         if (matches == null) {
             out.writeBoolean(false);
@@ -177,7 +138,7 @@ public class IndexResponse implements ActionResponse, Streamable {
             out.writeBoolean(true);
             out.writeVInt(matches.size());
             for (String match : matches) {
-                out.writeUTF(match);
+                out.writeString(match);
             }
         }
     }

@@ -19,10 +19,12 @@
 
 package org.elasticsearch.common.lucene;
 
-import org.apache.lucene.analysis.KeywordAnalyzer;
+import org.apache.lucene.analysis.core.KeywordAnalyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.index.*;
 import org.apache.lucene.search.*;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.Version;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.io.stream.StreamInput;
@@ -30,7 +32,7 @@ import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.index.analysis.AnalyzerScope;
 import org.elasticsearch.index.analysis.NamedAnalyzer;
-import org.elasticsearch.index.field.data.FieldDataType;
+import org.elasticsearch.index.fielddata.IndexFieldData;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
@@ -40,7 +42,7 @@ import java.lang.reflect.Field;
  */
 public class Lucene {
 
-    public static final Version VERSION = Version.LUCENE_36;
+    public static final Version VERSION = Version.LUCENE_43;
     public static final Version ANALYZER_VERSION = VERSION;
     public static final Version QUERYPARSER_VERSION = VERSION;
 
@@ -51,11 +53,21 @@ public class Lucene {
 
     public static ScoreDoc[] EMPTY_SCORE_DOCS = new ScoreDoc[0];
 
-    public static final int BATCH_ENUM_DOCS = 32;
-
     public static Version parseVersion(@Nullable String version, Version defaultVersion, ESLogger logger) {
         if (version == null) {
             return defaultVersion;
+        }
+        if ("4.3".equals(version)) {
+            return Version.LUCENE_43;
+        }
+        if ("4.2".equals(version)) {
+            return Version.LUCENE_42;
+        }
+        if ("4.1".equals(version)) {
+            return Version.LUCENE_41;
+        }
+        if ("4.0".equals(version)) {
+            return Version.LUCENE_40;
         }
         if ("3.6".equals(version)) {
             return Version.LUCENE_36;
@@ -82,26 +94,23 @@ public class Lucene {
         return defaultVersion;
     }
 
-    public static long count(IndexSearcher searcher, Query query, float minScore) throws IOException {
-        return count(searcher, query, null, minScore);
+    /**
+     * Reads the segments infos, failing if it fails to load
+     */
+    public static SegmentInfos readSegmentInfos(Directory directory) throws IOException {
+        final SegmentInfos sis = new SegmentInfos();
+        sis.read(directory);
+        return sis;
     }
 
-    public static long count(IndexSearcher searcher, Query query, Filter filter, float minScore) throws IOException {
-        CountCollector countCollector = new CountCollector(minScore);
-        searcher.search(query, filter, countCollector);
-        return countCollector.count();
-    }
-
-    public static int docId(IndexReader reader, Term term) throws IOException {
-        TermDocs termDocs = reader.termDocs(term);
-        try {
-            if (termDocs.next()) {
-                return termDocs.doc();
-            }
-            return NO_DOC;
-        } finally {
-            termDocs.close();
+    public static long count(IndexSearcher searcher, Query query) throws IOException {
+        TotalHitCountCollector countCollector = new TotalHitCountCollector();
+        // we don't need scores, so wrap it in a constant score query
+        if (!(query instanceof ConstantScoreQuery)) {
+            query = new ConstantScoreQuery(query);
         }
+        searcher.search(query, countCollector);
+        return countCollector.getTotalHits();
     }
 
     /**
@@ -132,9 +141,9 @@ public class Lucene {
             for (int i = 0; i < fields.length; i++) {
                 String field = null;
                 if (in.readBoolean()) {
-                    field = in.readUTF();
+                    field = in.readString();
                 }
-                fields[i] = new SortField(field, in.readVInt(), in.readBoolean());
+                fields[i] = new SortField(field, readSortType(in), in.readBoolean());
             }
 
             FieldDoc[] fieldDocs = new FieldDoc[in.readVInt()];
@@ -145,7 +154,7 @@ public class Lucene {
                     if (type == 0) {
                         cFields[j] = null;
                     } else if (type == 1) {
-                        cFields[j] = in.readUTF();
+                        cFields[j] = in.readString();
                     } else if (type == 2) {
                         cFields[j] = in.readInt();
                     } else if (type == 3) {
@@ -160,6 +169,8 @@ public class Lucene {
                         cFields[j] = in.readShort();
                     } else if (type == 8) {
                         cFields[j] = in.readBoolean();
+                    } else if (type == 9) {
+                        cFields[j] = in.readBytesRef();
                     } else {
                         throw new IOException("Can't match type [" + type + "]");
                     }
@@ -198,12 +209,12 @@ public class Lucene {
                     out.writeBoolean(false);
                 } else {
                     out.writeBoolean(true);
-                    out.writeUTF(sortField.getField());
+                    out.writeString(sortField.getField());
                 }
                 if (sortField.getComparatorSource() != null) {
-                    out.writeVInt(((FieldDataType.ExtendedFieldComparatorSource) sortField.getComparatorSource()).reducedType());
+                    writeSortType(out, ((IndexFieldData.XFieldComparatorSource) sortField.getComparatorSource()).reducedType());
                 } else {
-                    out.writeVInt(sortField.getType());
+                    writeSortType(out, sortField.getType());
                 }
                 out.writeBoolean(sortField.getReverse());
             }
@@ -223,7 +234,7 @@ public class Lucene {
                         Class type = field.getClass();
                         if (type == String.class) {
                             out.writeByte((byte) 1);
-                            out.writeUTF((String) field);
+                            out.writeString((String) field);
                         } else if (type == Integer.class) {
                             out.writeByte((byte) 2);
                             out.writeInt((Integer) field);
@@ -245,6 +256,9 @@ public class Lucene {
                         } else if (type == Boolean.class) {
                             out.writeByte((byte) 8);
                             out.writeBoolean((Boolean) field);
+                        } else if (type == BytesRef.class) {
+                            out.writeByte((byte) 9);
+                            out.writeBytesRef((BytesRef) field);
                         } else {
                             throw new IOException("Can't handle sort field value of type [" + type + "]");
                         }
@@ -271,9 +285,18 @@ public class Lucene {
         }
     }
 
+    // LUCENE 4 UPGRADE: We might want to maintain our own ordinal, instead of Lucene's ordinal
+    public static SortField.Type readSortType(StreamInput in) throws IOException {
+        return SortField.Type.values()[in.readVInt()];
+    }
+
+    public static void writeSortType(StreamOutput out, SortField.Type sortType) throws IOException {
+        out.writeVInt(sortType.ordinal());
+    }
+
     public static Explanation readExplanation(StreamInput in) throws IOException {
         float value = in.readFloat();
-        String description = in.readUTF();
+        String description = in.readString();
         Explanation explanation = new Explanation(value, description);
         if (in.readBoolean()) {
             int size = in.readVInt();
@@ -286,7 +309,7 @@ public class Lucene {
 
     public static void writeExplanation(StreamOutput out, Explanation explanation) throws IOException {
         out.writeFloat(explanation.getValue());
-        out.writeUTF(explanation.getDescription());
+        out.writeString(explanation.getDescription());
         Explanation[] subExplanations = explanation.getDetails();
         if (subExplanations == null) {
             out.writeBoolean(false);
@@ -296,63 +319,6 @@ public class Lucene {
             for (Explanation subExp : subExplanations) {
                 writeExplanation(out, subExp);
             }
-        }
-    }
-
-    private static final Field segmentReaderSegmentInfoField;
-
-    static {
-        Field segmentReaderSegmentInfoFieldX = null;
-        try {
-            segmentReaderSegmentInfoFieldX = SegmentReader.class.getDeclaredField("si");
-            segmentReaderSegmentInfoFieldX.setAccessible(true);
-        } catch (NoSuchFieldException e) {
-            e.printStackTrace();
-        }
-        segmentReaderSegmentInfoField = segmentReaderSegmentInfoFieldX;
-    }
-
-    public static SegmentInfo getSegmentInfo(SegmentReader reader) {
-        try {
-            return (SegmentInfo) segmentReaderSegmentInfoField.get(reader);
-        } catch (IllegalAccessException e) {
-            return null;
-        }
-    }
-
-    public static class CountCollector extends Collector {
-
-        private final float minScore;
-        private Scorer scorer;
-        private long count;
-
-        public CountCollector(float minScore) {
-            this.minScore = minScore;
-        }
-
-        public long count() {
-            return this.count;
-        }
-
-        @Override
-        public void setScorer(Scorer scorer) throws IOException {
-            this.scorer = scorer;
-        }
-
-        @Override
-        public void collect(int doc) throws IOException {
-            if (scorer.score() > minScore) {
-                count++;
-            }
-        }
-
-        @Override
-        public void setNextReader(IndexReader reader, int docBase) throws IOException {
-        }
-
-        @Override
-        public boolean acceptsDocsOutOfOrder() {
-            return true;
         }
     }
 
@@ -379,7 +345,7 @@ public class Lucene {
         }
 
         @Override
-        public void setNextReader(IndexReader reader, int docBase) throws IOException {
+        public void setNextReader(AtomicReaderContext context) throws IOException {
         }
 
         @Override
@@ -390,5 +356,9 @@ public class Lucene {
 
     private Lucene() {
 
+    }
+    
+    public static final boolean indexExists(final Directory directory) throws IOException {
+        return DirectoryReader.indexExists(directory);
     }
 }

@@ -33,7 +33,6 @@ import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.cluster.routing.ShardsIterator;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.*;
@@ -121,7 +120,7 @@ public abstract class TransportSingleCustomOperationAction<Request extends Singl
             performFirst();
         }
 
-        private void onFailure(ShardRouting shardRouting, Exception e) {
+        private void onFailure(ShardRouting shardRouting, Throwable e) {
             if (logger.isTraceEnabled() && e != null) {
                 logger.trace(shardRouting.shortSummary() + ": Failed to execute [" + request + "]", e);
             }
@@ -142,7 +141,7 @@ public abstract class TransportSingleCustomOperationAction<Request extends Singl
                             try {
                                 Response response = shardOperation(request, -1);
                                 listener.onResponse(response);
-                            } catch (Exception e) {
+                            } catch (Throwable e) {
                                 onFailure(null, e);
                             }
                         }
@@ -153,7 +152,7 @@ public abstract class TransportSingleCustomOperationAction<Request extends Singl
                         final Response response = shardOperation(request, -1);
                         listener.onResponse(response);
                         return;
-                    } catch (Exception e) {
+                    } catch (Throwable e) {
                         onFailure(null, e);
                     }
                 }
@@ -175,7 +174,7 @@ public abstract class TransportSingleCustomOperationAction<Request extends Singl
                                     try {
                                         Response response = shardOperation(request, shard.id());
                                         listener.onResponse(response);
-                                    } catch (Exception e) {
+                                    } catch (Throwable e) {
                                         shardsIt.reset();
                                         onFailure(shard, e);
                                     }
@@ -187,7 +186,7 @@ public abstract class TransportSingleCustomOperationAction<Request extends Singl
                                 final Response response = shardOperation(request, shard.id());
                                 listener.onResponse(response);
                                 return;
-                            } catch (Exception e) {
+                            } catch (Throwable e) {
                                 shardsIt.reset();
                                 onFailure(shard, e);
                             }
@@ -204,10 +203,10 @@ public abstract class TransportSingleCustomOperationAction<Request extends Singl
             }
         }
 
-        private void perform(final Exception lastException) {
+        private void perform(final Throwable lastException) {
             final ShardRouting shard = shardsIt == null ? null : shardsIt.nextOrNull();
             if (shard == null) {
-                Exception failure = lastException;
+                Throwable failure = lastException;
                 if (failure == null) {
                     failure = new NoShardAvailableActionException(null, "No shard available for [" + request + "]");
                 } else {
@@ -228,7 +227,7 @@ public abstract class TransportSingleCustomOperationAction<Request extends Singl
                                     try {
                                         Response response = shardOperation(request, shard.id());
                                         listener.onResponse(response);
-                                    } catch (Exception e) {
+                                    } catch (Throwable e) {
                                         onFailure(shard, e);
                                     }
                                 }
@@ -237,7 +236,7 @@ public abstract class TransportSingleCustomOperationAction<Request extends Singl
                             try {
                                 final Response response = shardOperation(request, shard.id());
                                 listener.onResponse(response);
-                            } catch (Exception e) {
+                            } catch (Throwable e) {
                                 onFailure(shard, e);
                             }
                         }
@@ -290,7 +289,7 @@ public abstract class TransportSingleCustomOperationAction<Request extends Singl
                 public void onResponse(Response result) {
                     try {
                         channel.sendResponse(result);
-                    } catch (Exception e) {
+                    } catch (Throwable e) {
                         onFailure(e);
                     }
                 }
@@ -331,16 +330,16 @@ public abstract class TransportSingleCustomOperationAction<Request extends Singl
         }
     }
 
-    protected class ShardSingleOperationRequest implements Streamable {
+    protected class ShardSingleOperationRequest extends TransportRequest {
 
         private Request request;
-
         private int shardId;
 
         ShardSingleOperationRequest() {
         }
 
         public ShardSingleOperationRequest(Request request, int shardId) {
+            super(request);
             this.request = request;
             this.shardId = shardId;
         }
@@ -355,6 +354,7 @@ public abstract class TransportSingleCustomOperationAction<Request extends Singl
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
+            super.readFrom(in);
             request = newRequest();
             request.readFrom(in);
             shardId = in.readVInt();
@@ -362,6 +362,7 @@ public abstract class TransportSingleCustomOperationAction<Request extends Singl
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
+            super.writeTo(out);
             request.writeTo(out);
             out.writeVInt(shardId);
         }

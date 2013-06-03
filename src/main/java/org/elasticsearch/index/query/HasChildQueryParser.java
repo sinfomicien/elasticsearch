@@ -19,14 +19,17 @@
 
 package org.elasticsearch.index.query;
 
-import org.apache.lucene.search.ConstantScoreQuery;
-import org.apache.lucene.search.FilteredQuery;
+import org.apache.lucene.search.Filter;
 import org.apache.lucene.search.Query;
+import org.elasticsearch.ElasticSearchIllegalStateException;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.inject.Inject;
+import org.elasticsearch.common.lucene.search.XConstantScoreQuery;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.index.mapper.DocumentMapper;
+import org.elasticsearch.index.search.child.ChildrenQuery;
 import org.elasticsearch.index.search.child.HasChildFilter;
+import org.elasticsearch.index.search.child.ScoreType;
 import org.elasticsearch.search.internal.SearchContext;
 
 import java.io.IOException;
@@ -51,11 +54,11 @@ public class HasChildQueryParser implements QueryParser {
     public Query parse(QueryParseContext parseContext) throws IOException, QueryParsingException {
         XContentParser parser = parseContext.parser();
 
-        Query query = null;
+        Query innerQuery = null;
         boolean queryFound = false;
         float boost = 1.0f;
         String childType = null;
-        String scope = null;
+        ScoreType scoreType = null;
 
         String currentFieldName = null;
         XContentParser.Token token;
@@ -68,7 +71,7 @@ public class HasChildQueryParser implements QueryParser {
                     // since we switch types, make sure we change the context
                     String[] origTypes = QueryParseContext.setTypesWithPrevious(childType == null ? null : new String[]{childType});
                     try {
-                        query = parseContext.parseInnerQuery();
+                        innerQuery = parseContext.parseInnerQuery();
                         queryFound = true;
                     } finally {
                         QueryParseContext.setTypes(origTypes);
@@ -77,10 +80,20 @@ public class HasChildQueryParser implements QueryParser {
                     throw new QueryParsingException(parseContext.index(), "[has_child] query does not support [" + currentFieldName + "]");
                 }
             } else if (token.isValue()) {
-                if ("type".equals(currentFieldName)) {
+                if ("type".equals(currentFieldName) || "child_type".equals(currentFieldName) || "childType".equals(currentFieldName)) {
                     childType = parser.text();
                 } else if ("_scope".equals(currentFieldName)) {
-                    scope = parser.text();
+                    throw new QueryParsingException(parseContext.index(), "the [_scope] support in [has_child] query has been removed, use a filter as a facet_filter in the relevant global facet");
+                } else if ("score_type".equals(currentFieldName) || "scoreType".equals(currentFieldName)) {
+                    String scoreTypeValue = parser.text();
+                    if (!"none".equals(scoreTypeValue)) {
+                        scoreType = ScoreType.fromString(scoreTypeValue);
+                    }
+                } else if ("score_mode".equals(currentFieldName) || "scoreMode".equals(currentFieldName)) {
+                    String scoreModeValue = parser.text();
+                    if (!"none".equals(scoreModeValue)) {
+                        scoreType = ScoreType.fromString(scoreModeValue);
+                    }
                 } else if ("boost".equals(currentFieldName)) {
                     boost = parser.floatValue();
                 } else {
@@ -91,12 +104,13 @@ public class HasChildQueryParser implements QueryParser {
         if (!queryFound) {
             throw new QueryParsingException(parseContext.index(), "[has_child] requires 'query' field");
         }
-        if (query == null) {
+        if (innerQuery == null) {
             return null;
         }
         if (childType == null) {
             throw new QueryParsingException(parseContext.index(), "[has_child] requires 'type' field");
         }
+        innerQuery.setBoost(boost);
 
         DocumentMapper childDocMapper = parseContext.mapperService().documentMapper(childType);
         if (childDocMapper == null) {
@@ -106,17 +120,26 @@ public class HasChildQueryParser implements QueryParser {
             throw new QueryParsingException(parseContext.index(), "[has_child]  Type [" + childType + "] does not have parent mapping");
         }
         String parentType = childDocMapper.parentFieldMapper().type();
+        DocumentMapper parentDocMapper = parseContext.mapperService().documentMapper(parentType);
 
-        query.setBoost(boost);
         // wrap the query with type query
-        query = new FilteredQuery(query, parseContext.cacheFilter(childDocMapper.typeFilter(), null));
-
         SearchContext searchContext = SearchContext.current();
-        HasChildFilter childFilter = new HasChildFilter(query, scope, childType, parentType, searchContext);
-        // we don't need DeletionAwareConstantScore, since we filter deleted parent docs in the filter
-        ConstantScoreQuery childQuery = new ConstantScoreQuery(childFilter);
-        childQuery.setBoost(boost);
-        searchContext.addScopePhase(childFilter);
-        return childQuery;
+        if (searchContext == null) {
+            throw new ElasticSearchIllegalStateException("[has_child] Can't execute, search context not set.");
+        }
+
+        Query query;
+        Filter parentFilter = parseContext.cacheFilter(parentDocMapper.typeFilter(), null);
+        if (scoreType != null) {
+            ChildrenQuery childrenQuery = new ChildrenQuery(searchContext, parentType, childType, parentFilter, innerQuery, scoreType);
+            searchContext.addRewrite(childrenQuery);
+            query = childrenQuery;
+        } else {
+            HasChildFilter hasChildFilter = new HasChildFilter(innerQuery, parentType, childType, parentFilter, searchContext);
+            searchContext.addRewrite(hasChildFilter);
+            query = new XConstantScoreQuery(hasChildFilter);
+        }
+        query.setBoost(boost);
+        return query;
     }
 }

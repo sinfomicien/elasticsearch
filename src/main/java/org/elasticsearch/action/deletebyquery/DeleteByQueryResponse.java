@@ -22,7 +22,7 @@ package org.elasticsearch.action.deletebyquery;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
+import org.elasticsearch.rest.RestStatus;
 
 import java.io.IOException;
 import java.util.Iterator;
@@ -33,10 +33,8 @@ import static com.google.common.collect.Maps.newHashMap;
 /**
  * The response of delete by query action. Holds the {@link IndexDeleteByQueryResponse}s from all the
  * different indices.
- *
- *
  */
-public class DeleteByQueryResponse implements ActionResponse, Streamable, Iterable<IndexDeleteByQueryResponse> {
+public class DeleteByQueryResponse extends ActionResponse implements Iterable<IndexDeleteByQueryResponse> {
 
     private Map<String, IndexDeleteByQueryResponse> indices = newHashMap();
 
@@ -52,13 +50,6 @@ public class DeleteByQueryResponse implements ActionResponse, Streamable, Iterab
     /**
      * The responses from all the different indices.
      */
-    public Map<String, IndexDeleteByQueryResponse> indices() {
-        return indices;
-    }
-
-    /**
-     * The responses from all the different indices.
-     */
     public Map<String, IndexDeleteByQueryResponse> getIndices() {
         return indices;
     }
@@ -66,22 +57,44 @@ public class DeleteByQueryResponse implements ActionResponse, Streamable, Iterab
     /**
      * The response of a specific index.
      */
-    public IndexDeleteByQueryResponse index(String index) {
+    public IndexDeleteByQueryResponse getIndex(String index) {
         return indices.get(index);
+    }
+
+    public RestStatus status() {
+        RestStatus status = RestStatus.OK;
+        for (IndexDeleteByQueryResponse indexResponse : indices.values()) {
+            if (indexResponse.getFailedShards() > 0) {
+                RestStatus indexStatus = indexResponse.getFailures()[0].status();
+                if (indexResponse.getFailures().length > 1) {
+                    for (int i = 1; i < indexResponse.getFailures().length; i++) {
+                        if (indexResponse.getFailures()[i].status().getStatus() >= 500) {
+                            indexStatus = indexResponse.getFailures()[i].status();
+                        }
+                    }
+                }
+                if (status.getStatus() < indexStatus.getStatus()) {
+                    status = indexStatus;
+                }
+            }
+        }
+        return status;
     }
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
+        super.readFrom(in);
         int size = in.readVInt();
         for (int i = 0; i < size; i++) {
             IndexDeleteByQueryResponse response = new IndexDeleteByQueryResponse();
             response.readFrom(in);
-            indices.put(response.index(), response);
+            indices.put(response.getIndex(), response);
         }
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
+        super.writeTo(out);
         out.writeVInt(indices.size());
         for (IndexDeleteByQueryResponse indexResponse : indices.values()) {
             indexResponse.writeTo(out);

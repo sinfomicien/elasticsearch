@@ -9,6 +9,7 @@ import org.elasticsearch.common.io.stream.Streamable;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentBuilderString;
+import org.elasticsearch.common.xcontent.XContentFactory;
 
 import java.io.IOException;
 import java.util.Iterator;
@@ -16,7 +17,7 @@ import java.util.Iterator;
 /**
  * A multi search response.
  */
-public class MultiSearchResponse implements ActionResponse, Iterable<MultiSearchResponse.Item>, ToXContent {
+public class MultiSearchResponse extends ActionResponse implements Iterable<MultiSearchResponse.Item>, ToXContent {
 
     /**
      * A search response item, holding the actual search response, or an error message if it failed.
@@ -45,24 +46,8 @@ public class MultiSearchResponse implements ActionResponse, Iterable<MultiSearch
          * The actual failure message, null if its not a failure.
          */
         @Nullable
-        public String failureMessage() {
-            return failureMessage;
-        }
-
-        /**
-         * The actual failure message, null if its not a failure.
-         */
-        @Nullable
         public String getFailureMessage() {
             return failureMessage;
-        }
-
-        /**
-         * The actual search response, null if its a failure.
-         */
-        @Nullable
-        public SearchResponse response() {
-            return this.response;
         }
 
         /**
@@ -85,7 +70,7 @@ public class MultiSearchResponse implements ActionResponse, Iterable<MultiSearch
                 this.response = new SearchResponse();
                 response.readFrom(in);
             } else {
-                failureMessage = in.readUTF();
+                failureMessage = in.readString();
             }
         }
 
@@ -95,7 +80,8 @@ public class MultiSearchResponse implements ActionResponse, Iterable<MultiSearch
                 out.writeBoolean(true);
                 response.writeTo(out);
             } else {
-                out.writeUTF(failureMessage);
+                out.writeBoolean(false);
+                out.writeString(failureMessage);
             }
         }
     }
@@ -117,19 +103,13 @@ public class MultiSearchResponse implements ActionResponse, Iterable<MultiSearch
     /**
      * The list of responses, the order is the same as the one provided in the request.
      */
-    public Item[] responses() {
-        return this.items;
-    }
-
-    /**
-     * The list of responses, the order is the same as the one provided in the request.
-     */
     public Item[] getResponses() {
         return this.items;
     }
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
+        super.readFrom(in);
         items = new Item[in.readVInt()];
         for (int i = 0; i < items.length; i++) {
             items[i] = Item.readItem(in);
@@ -138,6 +118,7 @@ public class MultiSearchResponse implements ActionResponse, Iterable<MultiSearch
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
+        super.writeTo(out);
         out.writeVInt(items.length);
         for (Item item : items) {
             item.writeTo(out);
@@ -150,11 +131,11 @@ public class MultiSearchResponse implements ActionResponse, Iterable<MultiSearch
         for (Item item : items) {
             if (item.isFailure()) {
                 builder.startObject();
-                builder.field(Fields.ERROR, item.failureMessage());
+                builder.field(Fields.ERROR, item.getFailureMessage());
                 builder.endObject();
             } else {
                 builder.startObject();
-                item.response().toXContent(builder, params);
+                item.getResponse().toXContent(builder, params);
                 builder.endObject();
             }
         }
@@ -165,5 +146,18 @@ public class MultiSearchResponse implements ActionResponse, Iterable<MultiSearch
     static final class Fields {
         static final XContentBuilderString RESPONSES = new XContentBuilderString("responses");
         static final XContentBuilderString ERROR = new XContentBuilderString("error");
+    }
+    
+    @Override
+    public String toString() {
+        try {
+            XContentBuilder builder = XContentFactory.jsonBuilder().prettyPrint();
+            builder.startObject();
+            toXContent(builder, EMPTY_PARAMS);
+            builder.endObject();
+            return builder.string();
+        } catch (IOException e) {
+            return "{ \"error\" : \"" + e.getMessage() + "\"}";
+        }
     }
 }

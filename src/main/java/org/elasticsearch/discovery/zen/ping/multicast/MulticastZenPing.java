@@ -62,44 +62,29 @@ public class MulticastZenPing extends AbstractLifecycleComponent<ZenPing> implem
     private static final byte[] INTERNAL_HEADER = new byte[]{1, 9, 8, 4};
 
     private final String address;
-
     private final int port;
-
     private final String group;
-
     private final int bufferSize;
-
     private final int ttl;
 
     private final ThreadPool threadPool;
-
     private final TransportService transportService;
-
     private final ClusterName clusterName;
-
     private final NetworkService networkService;
+    private volatile DiscoveryNodesProvider nodesProvider;
 
     private final boolean pingEnabled;
 
-
-    private volatile DiscoveryNodesProvider nodesProvider;
-
     private volatile Receiver receiver;
-
     private volatile Thread receiverThread;
-
-    private MulticastSocket multicastSocket;
-
+    private volatile MulticastSocket multicastSocket;
     private DatagramPacket datagramPacketSend;
-
     private DatagramPacket datagramPacketReceive;
 
     private final AtomicInteger pingIdGenerator = new AtomicInteger();
-
     private final Map<Integer, ConcurrentMap<DiscoveryNode, PingResponse>> receivedResponses = newConcurrentMap();
 
     private final Object sendMutex = new Object();
-
     private final Object receiveMutex = new Object();
 
     public MulticastZenPing(ThreadPool threadPool, TransportService transportService, ClusterName clusterName) {
@@ -316,7 +301,7 @@ public class MulticastZenPing extends AbstractLifecycleComponent<ZenPing> implem
             } else {
                 responses.put(request.pingResponse.target(), request.pingResponse);
             }
-            channel.sendResponse(VoidStreamable.INSTANCE);
+            channel.sendResponse(TransportResponse.Empty.INSTANCE);
         }
 
         @Override
@@ -325,7 +310,7 @@ public class MulticastZenPing extends AbstractLifecycleComponent<ZenPing> implem
         }
     }
 
-    static class MulticastPingResponse implements Streamable {
+    static class MulticastPingResponse extends TransportRequest {
 
         int id;
 
@@ -336,12 +321,14 @@ public class MulticastZenPing extends AbstractLifecycleComponent<ZenPing> implem
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
+            super.readFrom(in);
             id = in.readInt();
             pingResponse = PingResponse.readPingResponse(in);
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
+            super.writeTo(out);
             out.writeInt(id);
             pingResponse.writeTo(out);
         }
@@ -374,7 +361,23 @@ public class MulticastZenPing extends AbstractLifecycleComponent<ZenPing> implem
                             continue;
                         } catch (Exception e) {
                             if (running) {
-                                logger.warn("failed to receive packet", e);
+                                if (multicastSocket.isClosed()) {
+                                    logger.warn("multicast socket closed while running, restarting...");
+                                    // for some reason, the socket got closed on us while we are still running
+                                    // make a best effort in trying to start the multicast socket again...
+                                    threadPool.generic().execute(new Runnable() {
+                                        @Override
+                                        public void run() {
+                                            MulticastZenPing.this.stop();
+                                            MulticastZenPing.this.start();
+                                        }
+                                    });
+                                    running = false;
+                                    return;
+                                } else {
+                                    logger.warn("failed to receive packet, throttling...", e);
+                                    Thread.sleep(500);
+                                }
                             }
                             continue;
                         }
@@ -394,6 +397,7 @@ public class MulticastZenPing extends AbstractLifecycleComponent<ZenPing> implem
                             if (internal) {
                                 StreamInput input = CachedStreamInput.cachedHandles(new BytesStreamInput(datagramPacketReceive.getData(), datagramPacketReceive.getOffset() + INTERNAL_HEADER.length, datagramPacketReceive.getLength(), true));
                                 Version version = Version.readVersion(input);
+                                input.setVersion(version);
                                 id = input.readInt();
                                 clusterName = ClusterName.readClusterName(input);
                                 requestingNodeX = readNode(input);
@@ -419,7 +423,9 @@ public class MulticastZenPing extends AbstractLifecycleComponent<ZenPing> implem
                         handleNodePingRequest(id, requestingNodeX, clusterName);
                     }
                 } catch (Exception e) {
-                    logger.warn("unexpected exception in multicast receiver", e);
+                    if (running) {
+                        logger.warn("unexpected exception in multicast receiver", e);
+                    }
                 }
             }
         }
@@ -531,7 +537,7 @@ public class MulticastZenPing extends AbstractLifecycleComponent<ZenPing> implem
                         // connect to the node if possible
                         try {
                             transportService.connectToNode(requestingNode);
-                            transportService.sendRequest(requestingNode, MulticastPingResponseRequestHandler.ACTION, multicastPingResponse, new VoidTransportResponseHandler(ThreadPool.Names.SAME) {
+                            transportService.sendRequest(requestingNode, MulticastPingResponseRequestHandler.ACTION, multicastPingResponse, new EmptyTransportResponseHandler(ThreadPool.Names.SAME) {
                                 @Override
                                 public void handleException(TransportException exp) {
                                     logger.warn("failed to receive confirmation on sent ping response to [{}]", exp, requestingNode);
@@ -543,7 +549,7 @@ public class MulticastZenPing extends AbstractLifecycleComponent<ZenPing> implem
                     }
                 });
             } else {
-                transportService.sendRequest(requestingNode, MulticastPingResponseRequestHandler.ACTION, multicastPingResponse, new VoidTransportResponseHandler(ThreadPool.Names.SAME) {
+                transportService.sendRequest(requestingNode, MulticastPingResponseRequestHandler.ACTION, multicastPingResponse, new EmptyTransportResponseHandler(ThreadPool.Names.SAME) {
                     @Override
                     public void handleException(TransportException exp) {
                         logger.warn("failed to receive confirmation on sent ping response to [{}]", exp, requestingNode);

@@ -30,10 +30,9 @@ import java.io.IOException;
 /**
  *
  */
-public class NodesShutdownResponse implements ActionResponse {
+public class NodesShutdownResponse extends ActionResponse {
 
     private ClusterName clusterName;
-
     private DiscoveryNode[] nodes;
 
     NodesShutdownResponse() {
@@ -44,24 +43,17 @@ public class NodesShutdownResponse implements ActionResponse {
         this.nodes = nodes;
     }
 
-    public ClusterName clusterName() {
+    public ClusterName getClusterName() {
         return this.clusterName;
     }
 
-    public ClusterName getClusterName() {
-        return clusterName();
-    }
-
-    public DiscoveryNode[] nodes() {
-        return this.nodes;
-    }
-
     public DiscoveryNode[] getNodes() {
-        return nodes();
+        return this.nodes;
     }
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
+        super.readFrom(in);
         clusterName = ClusterName.readClusterName(in);
         nodes = new DiscoveryNode[in.readVInt()];
         for (int i = 0; i < nodes.length; i++) {
@@ -71,6 +63,7 @@ public class NodesShutdownResponse implements ActionResponse {
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
+        super.writeTo(out);
         clusterName.writeTo(out);
         out.writeVInt(nodes.length);
         for (DiscoveryNode node : nodes) {

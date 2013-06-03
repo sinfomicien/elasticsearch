@@ -1,9 +1,28 @@
+/*
+ * Licensed to ElasticSearch and Shay Banon under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership. ElasticSearch licenses this
+ * file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 package org.elasticsearch.common.geo;
 
-import com.spatial4j.core.shape.*;
+import com.spatial4j.core.shape.Rectangle;
+import com.spatial4j.core.shape.Shape;
 import com.spatial4j.core.shape.jts.JtsGeometry;
 import com.vividsolutions.jts.geom.*;
-import com.vividsolutions.jts.geom.Point;
 import org.elasticsearch.ElasticSearchIllegalArgumentException;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 
@@ -11,9 +30,9 @@ import java.io.IOException;
 
 /**
  * Serializes {@link Shape} instances into GeoJSON format
- *
+ * <p/>
  * Example of the format used for points:
- *
+ * <p/>
  * { "type": "Point", "coordinates": [100.0, 0.0] }
  */
 public class GeoJSONShapeSerializer {
@@ -25,13 +44,13 @@ public class GeoJSONShapeSerializer {
      * Serializes the given {@link Shape} as GeoJSON format into the given
      * {@link XContentBuilder}
      *
-     * @param shape Shape that will be serialized
+     * @param shape   Shape that will be serialized
      * @param builder XContentBuilder it will be serialized to
      * @throws IOException Thrown if an error occurs while writing to the XContentBuilder
      */
     public static void serialize(Shape shape, XContentBuilder builder) throws IOException {
         if (shape instanceof JtsGeometry) {
-            Geometry geometry = ((JtsGeometry) shape).geo;
+            Geometry geometry = ((JtsGeometry) shape).getGeom();
             if (geometry instanceof Point) {
                 serializePoint((Point) geometry, builder);
             } else if (geometry instanceof LineString) {
@@ -40,6 +59,8 @@ public class GeoJSONShapeSerializer {
                 serializePolygon((Polygon) geometry, builder);
             } else if (geometry instanceof MultiPoint) {
                 serializeMultiPoint((MultiPoint) geometry, builder);
+            } else if (geometry instanceof MultiPolygon) {
+                serializeMulitPolygon((MultiPolygon) geometry, builder);
             } else {
                 throw new ElasticSearchIllegalArgumentException("Geometry type [" + geometry.getGeometryType() + "] not supported");
             }
@@ -56,7 +77,7 @@ public class GeoJSONShapeSerializer {
      * Serializes the given {@link Rectangle}
      *
      * @param rectangle Rectangle that will be serialized
-     * @param builder XContentBuilder it will be serialized to
+     * @param builder   XContentBuilder it will be serialized to
      * @throws IOException Thrown if an error occurs while writing to the XContentBuilder
      */
     private static void serializeRectangle(Rectangle rectangle, XContentBuilder builder) throws IOException {
@@ -70,7 +91,7 @@ public class GeoJSONShapeSerializer {
     /**
      * Serializes the given {@link Point}
      *
-     * @param point Point that will be serialized
+     * @param point   Point that will be serialized
      * @param builder XContentBuilder it will be serialized to
      * @throws IOException Thrown if an error occurs while writing to the XContentBuilder
      */
@@ -84,7 +105,7 @@ public class GeoJSONShapeSerializer {
     /**
      * Serializes the given {@link com.spatial4j.core.shape.Point}
      *
-     * @param point Point that will be serialized
+     * @param point   Point that will be serialized
      * @param builder XContentBuilder it will be serialized to
      * @throws IOException Thrown if an error occurs while writing to the XContentBuilder
      */
@@ -99,7 +120,7 @@ public class GeoJSONShapeSerializer {
      * Serializes the given {@link LineString}
      *
      * @param lineString LineString that will be serialized
-     * @param builder XContentBuilder it will be serialized to
+     * @param builder    XContentBuilder it will be serialized to
      * @throws IOException Thrown if an error occurs while writing to the XContentBuilder
      */
     private static void serializeLineString(LineString lineString, XContentBuilder builder) throws IOException {
@@ -124,6 +145,19 @@ public class GeoJSONShapeSerializer {
         builder.field("type", "Polygon")
                 .startArray("coordinates");
 
+        serializePolygonCoordinates(polygon, builder);
+
+        builder.endArray();
+    }
+
+    /**
+     * Serializes the actual coordinates of the given {@link Polygon}
+     *
+     * @param polygon Polygon whose coordinates will be serialized
+     * @param builder XContentBuilder it will be serialized to
+     * @throws IOException Thrown if an error occurs while writing to the XContentBuilder
+     */
+    private static void serializePolygonCoordinates(Polygon polygon, XContentBuilder builder) throws IOException {
         builder.startArray(); // start outer ring
 
         for (Coordinate coordinate : polygon.getExteriorRing().getCoordinates()) {
@@ -143,7 +177,26 @@ public class GeoJSONShapeSerializer {
 
             builder.endArray();
         }
+    }
 
+    /**
+     * Serializes the given {@link MultiPolygon}
+     *
+     * @param multiPolygon MultiPolygon that will be serialized
+     * @param builder XContentBuilder it will be serialized to
+     * @throws IOException Thrown if an error occurs while writing to the XContentBuilder
+     */
+    private static void serializeMulitPolygon(MultiPolygon multiPolygon, XContentBuilder builder) throws IOException {
+        builder.field("type", "MultiPolygon")
+                .startArray("coordinates");
+
+        for (int i = 0; i < multiPolygon.getNumGeometries(); i++) {
+            builder.startArray();
+
+            serializePolygonCoordinates((Polygon) multiPolygon.getGeometryN(i), builder);
+
+            builder.endArray();
+        }
 
         builder.endArray();
     }
@@ -151,8 +204,8 @@ public class GeoJSONShapeSerializer {
     /**
      * Serializes the given {@link MultiPoint}
      *
-     * @param multiPoint MulitPoint that will be serialized
-     * @param builder XContentBuilder it will be serialized to
+     * @param multiPoint MultiPoint that will be serialized
+     * @param builder    XContentBuilder it will be serialized to
      * @throws IOException Thrown if an error occurs while writing to the XContentBuilder
      */
     private static void serializeMultiPoint(MultiPoint multiPoint, XContentBuilder builder) throws IOException {
@@ -170,7 +223,7 @@ public class GeoJSONShapeSerializer {
      * Serializes the given {@link Coordinate}
      *
      * @param coordinate Coordinate that will be serialized
-     * @param builder XContentBuilder it will be serialized to
+     * @param builder    XContentBuilder it will be serialized to
      * @throws IOException Thrown if an error occurs while writing to the XContentBuilder
      */
     private static void serializeCoordinate(Coordinate coordinate, XContentBuilder builder) throws IOException {

@@ -19,17 +19,18 @@
 
 package org.elasticsearch.index.merge.scheduler;
 
-import org.apache.lucene.index.*;
-import org.apache.lucene.store.AlreadyClosedException;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.MergePolicy;
+import org.apache.lucene.index.MergeScheduler;
+import org.apache.lucene.index.TrackingConcurrentMergeScheduler;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.index.merge.MergeStats;
-import org.elasticsearch.index.merge.policy.EnableMergePolicy;
 import org.elasticsearch.index.settings.IndexSettings;
-import org.elasticsearch.index.shard.AbstractIndexShardComponent;
 import org.elasticsearch.index.shard.ShardId;
+import org.elasticsearch.threadpool.ThreadPool;
 
 import java.io.IOException;
 import java.util.Set;
@@ -38,7 +39,7 @@ import java.util.concurrent.CopyOnWriteArraySet;
 /**
  *
  */
-public class ConcurrentMergeSchedulerProvider extends AbstractIndexShardComponent implements MergeSchedulerProvider {
+public class ConcurrentMergeSchedulerProvider extends MergeSchedulerProvider {
 
     private final int maxThreadCount;
     private final int maxMergeCount;
@@ -46,8 +47,8 @@ public class ConcurrentMergeSchedulerProvider extends AbstractIndexShardComponen
     private Set<CustomConcurrentMergeScheduler> schedulers = new CopyOnWriteArraySet<CustomConcurrentMergeScheduler>();
 
     @Inject
-    public ConcurrentMergeSchedulerProvider(ShardId shardId, @IndexSettings Settings indexSettings) {
-        super(shardId, indexSettings);
+    public ConcurrentMergeSchedulerProvider(ShardId shardId, @IndexSettings Settings indexSettings, ThreadPool threadPool) {
+        super(shardId, indexSettings, threadPool);
 
         // TODO LUCENE MONITOR this will change in Lucene 4.0
         this.maxThreadCount = componentSettings.getAsInt("max_thread_count", Math.max(1, Math.min(3, Runtime.getRuntime().availableProcessors() / 2)));
@@ -87,29 +88,6 @@ public class ConcurrentMergeSchedulerProvider extends AbstractIndexShardComponen
         }
 
         @Override
-        public void merge(IndexWriter writer) throws CorruptIndexException, IOException {
-            try {
-                // if merge is not enabled, don't do any merging...
-                if (writer.getConfig().getMergePolicy() instanceof EnableMergePolicy) {
-                    if (!((EnableMergePolicy) writer.getConfig().getMergePolicy()).isMergeEnabled()) {
-                        return;
-                    }
-                }
-            } catch (AlreadyClosedException e) {
-                // called writer#getMergePolicy can cause an AlreadyClosed failure, so ignore it
-                // since we are doing it on close, return here and don't do the actual merge
-                // since we do it outside of a lock in the RobinEngine
-                return;
-            }
-            try {
-                super.merge(writer);
-            } catch (IOException e) {
-                logger.warn("failed to merge", e);
-                throw e;
-            }
-        }
-
-        @Override
         protected MergeThread getMergeThread(IndexWriter writer, MergePolicy.OneMerge merge) throws IOException {
             MergeThread thread = super.getMergeThread(writer, merge);
             thread.setName(EsExecutors.threadName(provider.indexSettings(), "[" + shardId.index().name() + "][" + shardId.id() + "]: " + thread.getName()));
@@ -119,6 +97,7 @@ public class ConcurrentMergeSchedulerProvider extends AbstractIndexShardComponen
         @Override
         protected void handleMergeException(Throwable exc) {
             logger.warn("failed to merge", exc);
+            provider.failedMerge(new MergePolicy.MergeException(exc, dir));
             super.handleMergeException(exc);
         }
 

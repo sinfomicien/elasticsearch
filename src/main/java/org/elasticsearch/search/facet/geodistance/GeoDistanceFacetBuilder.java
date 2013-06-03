@@ -21,25 +21,24 @@ package org.elasticsearch.search.facet.geodistance;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import org.elasticsearch.common.geo.GeoDistance;
 import org.elasticsearch.common.unit.DistanceUnit;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.index.query.FilterBuilder;
-import org.elasticsearch.index.search.geo.GeoDistance;
 import org.elasticsearch.search.builder.SearchSourceBuilderException;
-import org.elasticsearch.search.facet.AbstractFacetBuilder;
+import org.elasticsearch.search.facet.FacetBuilder;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
  * A geo distance builder allowing to create a facet of distances from a specific location including the
  * number of hits within each distance range, and aggregated data (like totals of either the distance or
  * cusotm value fields).
- *
- *
  */
-public class GeoDistanceFacetBuilder extends AbstractFacetBuilder {
+public class GeoDistanceFacetBuilder extends FacetBuilder {
 
     private String fieldName;
 
@@ -204,15 +203,6 @@ public class GeoDistanceFacetBuilder extends AbstractFacetBuilder {
         return this;
     }
 
-    /**
-     * Marks the facet to run in a specific scope.
-     */
-    @Override
-    public GeoDistanceFacetBuilder scope(String scope) {
-        super.scope(scope);
-        return this;
-    }
-
     public GeoDistanceFacetBuilder facetFilter(FilterBuilder filter) {
         this.facetFilter = filter;
         return this;
@@ -277,7 +267,7 @@ public class GeoDistanceFacetBuilder extends AbstractFacetBuilder {
             builder.field("unit", unit);
         }
         if (geoDistance != null) {
-            builder.field("distance_type", geoDistance.name().toLowerCase());
+            builder.field("distance_type", geoDistance.name().toLowerCase(Locale.ROOT));
         }
 
         builder.endObject();

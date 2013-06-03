@@ -25,7 +25,6 @@ import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.discovery.zen.DiscoveryNodesProvider;
@@ -310,7 +309,7 @@ public class MasterFaultDetection extends AbstractComponent {
                                         return;
                                     } else if (exp.getCause() instanceof NotMasterException) {
                                         logger.debug("[master] pinging a master {} that is not the master", masterNode);
-                                        notifyMasterFailure(masterToPing, "no longer master");
+                                        notifyMasterFailure(masterToPing, "not master");
                                         return;
                                     } else if (exp.getCause() instanceof NodeDoesNotExistOnMasterException) {
                                         logger.debug("[master] pinging a master {} but we do not exists on it, act as if its master failure", masterNode);
@@ -395,7 +394,7 @@ public class MasterFaultDetection extends AbstractComponent {
     }
 
 
-    private static class MasterPingRequest implements Streamable {
+    private static class MasterPingRequest extends TransportRequest {
 
         private String nodeId;
 
@@ -411,18 +410,20 @@ public class MasterFaultDetection extends AbstractComponent {
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
-            nodeId = in.readUTF();
-            masterNodeId = in.readUTF();
+            super.readFrom(in);
+            nodeId = in.readString();
+            masterNodeId = in.readString();
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
-            out.writeUTF(nodeId);
-            out.writeUTF(masterNodeId);
+            super.writeTo(out);
+            out.writeString(nodeId);
+            out.writeString(masterNodeId);
         }
     }
 
-    private static class MasterPingResponseResponse implements Streamable {
+    private static class MasterPingResponseResponse extends TransportResponse {
 
         private boolean connectedToMaster;
 
@@ -435,11 +436,13 @@ public class MasterFaultDetection extends AbstractComponent {
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
+            super.readFrom(in);
             connectedToMaster = in.readBoolean();
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
+            super.writeTo(out);
             out.writeBoolean(connectedToMaster);
         }
     }

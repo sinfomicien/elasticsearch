@@ -20,24 +20,19 @@
 package org.elasticsearch.action.admin.indices.refresh;
 
 import org.elasticsearch.action.ActionListener;
-import org.elasticsearch.action.admin.indices.support.BaseIndicesRequestBuilder;
-import org.elasticsearch.action.support.broadcast.BroadcastOperationThreading;
+import org.elasticsearch.action.support.broadcast.BroadcastOperationRequestBuilder;
 import org.elasticsearch.client.IndicesAdminClient;
+import org.elasticsearch.client.internal.InternalIndicesAdminClient;
 
 /**
  * A refresh request making all operations performed since the last refresh available for search. The (near) real-time
  * capabilities depends on the index engine used. For example, the robin one requires refresh to be called, but by
  * default a refresh is scheduled periodically.
  */
-public class RefreshRequestBuilder extends BaseIndicesRequestBuilder<RefreshRequest, RefreshResponse> {
+public class RefreshRequestBuilder extends BroadcastOperationRequestBuilder<RefreshRequest, RefreshResponse, RefreshRequestBuilder> {
 
     public RefreshRequestBuilder(IndicesAdminClient indicesClient) {
-        super(indicesClient, new RefreshRequest());
-    }
-
-    public RefreshRequestBuilder setIndices(String... indices) {
-        request.indices(indices);
-        return this;
+        super((InternalIndicesAdminClient) indicesClient, new RefreshRequest());
     }
 
     public RefreshRequestBuilder setWaitForOperations(boolean waitForOperations) {
@@ -45,24 +40,8 @@ public class RefreshRequestBuilder extends BaseIndicesRequestBuilder<RefreshRequ
         return this;
     }
 
-    /**
-     * Should the listener be called on a separate thread if needed.
-     */
-    public RefreshRequestBuilder setListenerThreaded(boolean threadedListener) {
-        request.listenerThreaded(threadedListener);
-        return this;
-    }
-
-    /**
-     * Controls the operation threading model.
-     */
-    public RefreshRequestBuilder setOperationThreading(BroadcastOperationThreading operationThreading) {
-        request.operationThreading(operationThreading);
-        return this;
-    }
-
     @Override
     protected void doExecute(ActionListener<RefreshResponse> listener) {
-        client.refresh(request, listener);
+        ((IndicesAdminClient) client).refresh(request, listener);
     }
 }

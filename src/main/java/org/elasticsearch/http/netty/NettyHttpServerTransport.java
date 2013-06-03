@@ -112,6 +112,11 @@ public class NettyHttpServerTransport extends AbstractLifecycleComponent<HttpSer
     public NettyHttpServerTransport(Settings settings, NetworkService networkService) {
         super(settings);
         this.networkService = networkService;
+
+        if (settings.getAsBoolean("netty.epollBugWorkaround", false)) {
+            System.setProperty("org.jboss.netty.epollBugWorkaround", "true");
+        }
+
         ByteSizeValue maxContentLength = componentSettings.getAsBytesSize("max_content_length", settings.getAsBytesSize("http.max_content_length", new ByteSizeValue(100, ByteSizeUnit.MB)));
         this.maxChunkSize = componentSettings.getAsBytesSize("max_chunk_size", settings.getAsBytesSize("http.max_chunk_size", new ByteSizeValue(8, ByteSizeUnit.KB)));
         this.maxHeaderSize = componentSettings.getAsBytesSize("max_header_size", settings.getAsBytesSize("http.max_header_size", new ByteSizeValue(8, ByteSizeUnit.KB)));
@@ -160,6 +165,10 @@ public class NettyHttpServerTransport extends AbstractLifecycleComponent<HttpSer
 
         logger.debug("using max_chunk_size[{}], max_header_size[{}], max_initial_line_length[{}], max_content_length[{}], receive_predictor[{}->{}]",
                 maxChunkSize, maxHeaderSize, maxInitialLineLength, this.maxContentLength, receivePredictorMin, receivePredictorMax);
+    }
+
+    public Settings settings() {
+        return this.settings;
     }
 
     public void httpServerAdapter(HttpServerAdapter httpServerAdapter) {
@@ -264,6 +273,11 @@ public class NettyHttpServerTransport extends AbstractLifecycleComponent<HttpSer
 
     public BoundTransportAddress boundAddress() {
         return this.boundAddress;
+    }
+
+    @Override
+    public HttpInfo info() {
+        return new HttpInfo(boundAddress(), maxContentLength.bytes());
     }
 
     @Override

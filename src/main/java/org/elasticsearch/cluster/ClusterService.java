@@ -23,6 +23,7 @@ import org.elasticsearch.ElasticSearchIllegalStateException;
 import org.elasticsearch.cluster.block.ClusterBlock;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.routing.operation.OperationRouting;
+import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.component.LifecycleComponent;
 import org.elasticsearch.common.unit.TimeValue;
 
@@ -73,12 +74,27 @@ public interface ClusterService extends LifecycleComponent<ClusterService> {
     void remove(ClusterStateListener listener);
 
     /**
+     * Add a listener for on/off local node master events
+     */
+    void add(LocalNodeMasterListener listener);
+
+    /**
+     * Remove the given listener for on/off local master events
+     */
+    void remove(LocalNodeMasterListener listener);
+
+    /**
      * Adds a cluster state listener that will timeout after the provided timeout.
      */
     void add(TimeValue timeout, TimeoutClusterStateListener listener);
 
     /**
      * Submits a task that will update the cluster state.
+     */
+    void submitStateUpdateTask(final String source, Priority priority, final ClusterStateUpdateTask updateTask);
+
+    /**
+     * Submits a task that will update the cluster state (the task has a default priority of {@link Priority#NORMAL}).
      */
     void submitStateUpdateTask(final String source, final ClusterStateUpdateTask updateTask);
 }

@@ -23,6 +23,7 @@ import org.elasticsearch.ElasticSearchGenerationException;
 import org.elasticsearch.ElasticSearchIllegalArgumentException;
 import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.ActionRequestValidationException;
+import org.elasticsearch.action.support.IgnoreIndices;
 import org.elasticsearch.client.Requests;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Strings;
@@ -55,7 +56,7 @@ import static org.elasticsearch.search.Scroll.readScroll;
  * @see org.elasticsearch.client.Client#search(SearchRequest)
  * @see SearchResponse
  */
-public class SearchRequest implements ActionRequest {
+public class SearchRequest extends ActionRequest<SearchRequest> {
 
     private static final XContentType contentType = Requests.CONTENT_TYPE;
 
@@ -63,8 +64,6 @@ public class SearchRequest implements ActionRequest {
 
     private String[] indices;
 
-    @Nullable
-    private String queryHint;
     @Nullable
     private String routing;
     @Nullable
@@ -80,8 +79,9 @@ public class SearchRequest implements ActionRequest {
 
     private String[] types = Strings.EMPTY_ARRAY;
 
-    private boolean listenerThreaded = false;
     private SearchOperationThreading operationThreading = SearchOperationThreading.THREAD_PER_SHARD;
+
+    private IgnoreIndices ignoreIndices = IgnoreIndices.DEFAULT;
 
     public SearchRequest() {
     }
@@ -91,14 +91,14 @@ public class SearchRequest implements ActionRequest {
      * will run against all indices.
      */
     public SearchRequest(String... indices) {
-        this.indices = indices;
+        indices(indices);
     }
 
     /**
      * Constructs a new search request against the provided indices with the given search source.
      */
     public SearchRequest(String[] indices, byte[] source) {
-        this.indices = indices;
+        indices(indices);
         this.source = new BytesArray(source);
     }
 
@@ -132,27 +132,19 @@ public class SearchRequest implements ActionRequest {
     }
 
     /**
-     * Should the listener be called on a separate thread if needed.
-     */
-    @Override
-    public boolean listenerThreaded() {
-        return listenerThreaded;
-    }
-
-    /**
      * Sets the indices the search will be executed on.
      */
     public SearchRequest indices(String... indices) {
+        if (indices == null) {
+            throw new ElasticSearchIllegalArgumentException("indices must not be null");
+        } else {
+            for (int i = 0; i < indices.length; i++) {
+                if (indices[i] == null) {
+                    throw new ElasticSearchIllegalArgumentException("indices[" + i +"] must not be null");
+                }
+            }
+        }
         this.indices = indices;
-        return this;
-    }
-
-    /**
-     * Should the listener be called on a separate thread if needed.
-     */
-    @Override
-    public SearchRequest listenerThreaded(boolean listenerThreaded) {
-        this.listenerThreaded = listenerThreaded;
         return this;
     }
 
@@ -177,6 +169,15 @@ public class SearchRequest implements ActionRequest {
      */
     public SearchRequest operationThreading(String operationThreading) {
         return operationThreading(SearchOperationThreading.fromString(operationThreading, this.operationThreading));
+    }
+
+    public IgnoreIndices ignoreIndices() {
+        return ignoreIndices;
+    }
+
+    public SearchRequest ignoreIndices(IgnoreIndices ignoreIndices) {
+        this.ignoreIndices = ignoreIndices;
+        return this;
     }
 
     /**
@@ -416,21 +417,6 @@ public class SearchRequest implements ActionRequest {
     }
 
     /**
-     * A query hint to optionally later be used when routing the request.
-     */
-    public SearchRequest queryHint(String queryHint) {
-        this.queryHint = queryHint;
-        return this;
-    }
-
-    /**
-     * A query hint to optionally later be used when routing the request.
-     */
-    public String queryHint() {
-        return queryHint;
-    }
-
-    /**
      * If set, will enable scrolling of the search request.
      */
     public Scroll scroll() {
@@ -461,23 +447,17 @@ public class SearchRequest implements ActionRequest {
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
+        super.readFrom(in);
         operationThreading = SearchOperationThreading.fromId(in.readByte());
         searchType = SearchType.fromId(in.readByte());
 
         indices = new String[in.readVInt()];
         for (int i = 0; i < indices.length; i++) {
-            indices[i] = in.readUTF();
+            indices[i] = in.readString();
         }
 
-        if (in.readBoolean()) {
-            queryHint = in.readUTF();
-        }
-        if (in.readBoolean()) {
-            routing = in.readUTF();
-        }
-        if (in.readBoolean()) {
-            preference = in.readUTF();
-        }
+        routing = in.readOptionalString();
+        preference = in.readOptionalString();
 
         if (in.readBoolean()) {
             scroll = readScroll(in);
@@ -489,43 +469,23 @@ public class SearchRequest implements ActionRequest {
         extraSourceUnsafe = false;
         extraSource = in.readBytesReference();
 
-        int typesSize = in.readVInt();
-        if (typesSize > 0) {
-            types = new String[typesSize];
-            for (int i = 0; i < typesSize; i++) {
-                types[i] = in.readUTF();
-            }
-        }
+        types = in.readStringArray();
+        ignoreIndices = IgnoreIndices.fromId(in.readByte());
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
+        super.writeTo(out);
         out.writeByte(operationThreading.id());
         out.writeByte(searchType.id());
 
         out.writeVInt(indices.length);
         for (String index : indices) {
-            out.writeUTF(index);
+            out.writeString(index);
         }
 
-        if (queryHint == null) {
-            out.writeBoolean(false);
-        } else {
-            out.writeBoolean(true);
-            out.writeUTF(queryHint);
-        }
-        if (routing == null) {
-            out.writeBoolean(false);
-        } else {
-            out.writeBoolean(true);
-            out.writeUTF(routing);
-        }
-        if (preference == null) {
-            out.writeBoolean(false);
-        } else {
-            out.writeBoolean(true);
-            out.writeUTF(preference);
-        }
+        out.writeOptionalString(routing);
+        out.writeOptionalString(preference);
 
         if (scroll == null) {
             out.writeBoolean(false);
@@ -535,9 +495,7 @@ public class SearchRequest implements ActionRequest {
         }
         out.writeBytesReference(source);
         out.writeBytesReference(extraSource);
-        out.writeVInt(types.length);
-        for (String type : types) {
-            out.writeUTF(type);
-        }
+        out.writeStringArray(types);
+        out.writeByte(ignoreIndices.id());
     }
 }

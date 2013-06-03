@@ -19,12 +19,10 @@
 
 package org.elasticsearch.index.merge.policy;
 
-import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.LogDocMergePolicy;
-import org.apache.lucene.index.SegmentInfo;
+import org.apache.lucene.index.MergePolicy;
 import org.apache.lucene.index.SegmentInfos;
 import org.elasticsearch.ElasticSearchException;
-import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.common.Preconditions;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
@@ -33,7 +31,6 @@ import org.elasticsearch.index.shard.AbstractIndexShardComponent;
 import org.elasticsearch.index.store.Store;
 
 import java.io.IOException;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 
@@ -61,7 +58,7 @@ public class LogDocMergePolicyProvider extends AbstractIndexShardComponent imple
         Preconditions.checkNotNull(store, "Store must be provided to merge policy");
         this.indexSettingsService = indexSettingsService;
 
-        this.compoundFormat = indexSettings.getAsBoolean("index.compound_format", store.suggestUseCompoundFile());
+        this.compoundFormat = indexSettings.getAsBoolean(INDEX_COMPOUND_FORMAT, store.suggestUseCompoundFile());
         this.minMergeDocs = componentSettings.getAsInt("min_merge_docs", LogDocMergePolicy.DEFAULT_MIN_MERGE_DOCS);
         this.maxMergeDocs = componentSettings.getAsInt("max_merge_docs", LogDocMergePolicy.DEFAULT_MAX_MERGE_DOCS);
         this.mergeFactor = componentSettings.getAsInt("merge_factor", LogDocMergePolicy.DEFAULT_MERGE_FACTOR);
@@ -74,7 +71,7 @@ public class LogDocMergePolicyProvider extends AbstractIndexShardComponent imple
     }
 
     @Override
-    public void close(boolean delete) throws ElasticSearchException {
+    public void close() throws ElasticSearchException {
         indexSettingsService.removeListener(applySettings);
     }
 
@@ -95,19 +92,16 @@ public class LogDocMergePolicyProvider extends AbstractIndexShardComponent imple
         return mergePolicy;
     }
 
-    static {
-        IndexMetaData.addDynamicSettings(
-                "index.merge.policy.min_merge_docs",
-                "index.merge.policy.max_merge_docs",
-                "index.merge.policy.merge_factor",
-                "index.compound_format"
-        );
-    }
+    public static final String INDEX_MERGE_POLICY_MIN_MERGE_DOCS = "index.merge.policy.min_merge_docs";
+    public static final String INDEX_MERGE_POLICY_MAX_MERGE_DOCS = "index.merge.policy.max_merge_docs";
+    public static final String INDEX_MERGE_POLICY_MERGE_FACTOR = "index.merge.policy.merge_factor";
+    public static final String INDEX_COMPOUND_FORMAT = "index.compound_format";
+
 
     class ApplySettings implements IndexSettingsService.Listener {
         @Override
         public void onRefreshSettings(Settings settings) {
-            int minMergeDocs = settings.getAsInt("index.merge.policy.min_merge_docs", LogDocMergePolicyProvider.this.minMergeDocs);
+            int minMergeDocs = settings.getAsInt(INDEX_MERGE_POLICY_MIN_MERGE_DOCS, LogDocMergePolicyProvider.this.minMergeDocs);
             if (minMergeDocs != LogDocMergePolicyProvider.this.minMergeDocs) {
                 logger.info("updating min_merge_docs from [{}] to [{}]", LogDocMergePolicyProvider.this.minMergeDocs, minMergeDocs);
                 LogDocMergePolicyProvider.this.minMergeDocs = minMergeDocs;
@@ -116,7 +110,7 @@ public class LogDocMergePolicyProvider extends AbstractIndexShardComponent imple
                 }
             }
 
-            int maxMergeDocs = settings.getAsInt("index.merge.policy.max_merge_docs", LogDocMergePolicyProvider.this.maxMergeDocs);
+            int maxMergeDocs = settings.getAsInt(INDEX_MERGE_POLICY_MAX_MERGE_DOCS, LogDocMergePolicyProvider.this.maxMergeDocs);
             if (maxMergeDocs != LogDocMergePolicyProvider.this.maxMergeDocs) {
                 logger.info("updating max_merge_docs from [{}] to [{}]", LogDocMergePolicyProvider.this.maxMergeDocs, maxMergeDocs);
                 LogDocMergePolicyProvider.this.maxMergeDocs = maxMergeDocs;
@@ -125,7 +119,7 @@ public class LogDocMergePolicyProvider extends AbstractIndexShardComponent imple
                 }
             }
 
-            int mergeFactor = settings.getAsInt("index.merge.policy.merge_factor", LogDocMergePolicyProvider.this.mergeFactor);
+            int mergeFactor = settings.getAsInt(INDEX_MERGE_POLICY_MERGE_FACTOR, LogDocMergePolicyProvider.this.mergeFactor);
             if (mergeFactor != LogDocMergePolicyProvider.this.mergeFactor) {
                 logger.info("updating merge_factor from [{}] to [{}]", LogDocMergePolicyProvider.this.mergeFactor, mergeFactor);
                 LogDocMergePolicyProvider.this.mergeFactor = mergeFactor;
@@ -134,7 +128,7 @@ public class LogDocMergePolicyProvider extends AbstractIndexShardComponent imple
                 }
             }
 
-            boolean compoundFormat = settings.getAsBoolean("index.compound_format", LogDocMergePolicyProvider.this.compoundFormat);
+            boolean compoundFormat = settings.getAsBoolean(INDEX_COMPOUND_FORMAT, LogDocMergePolicyProvider.this.compoundFormat);
             if (compoundFormat != LogDocMergePolicyProvider.this.compoundFormat) {
                 logger.info("updating index.compound_format from [{}] to [{}]", LogDocMergePolicyProvider.this.compoundFormat, compoundFormat);
                 LogDocMergePolicyProvider.this.compoundFormat = compoundFormat;
@@ -161,62 +155,26 @@ public class LogDocMergePolicyProvider extends AbstractIndexShardComponent imple
         }
     }
 
-    public static class EnableMergeLogDocMergePolicy extends CustomLogDocMergePolicy implements EnableMergePolicy {
-
-        private final ThreadLocal<Boolean> enableMerge = new ThreadLocal<Boolean>() {
-            @Override
-            protected Boolean initialValue() {
-                return Boolean.FALSE;
-            }
-        };
+    public static class EnableMergeLogDocMergePolicy extends CustomLogDocMergePolicy {
 
         public EnableMergeLogDocMergePolicy(LogDocMergePolicyProvider provider) {
             super(provider);
         }
 
         @Override
-        public void enableMerge() {
-            enableMerge.set(Boolean.TRUE);
-        }
-
-        @Override
-        public void disableMerge() {
-            enableMerge.set(Boolean.FALSE);
-        }
-
-        @Override
-        public boolean isMergeEnabled() {
-            return enableMerge.get() == Boolean.TRUE;
-        }
-
-        @Override
-        public void close() {
-            enableMerge.remove();
-            super.close();
-        }
-
-        @Override
-        public MergeSpecification findMerges(SegmentInfos infos) throws IOException {
-            if (enableMerge.get() == Boolean.FALSE) {
+        public MergeSpecification findMerges(MergeTrigger trigger, SegmentInfos infos) throws IOException {
+            // we don't enable merges while indexing documents, we do them in the background
+            if (trigger == MergeTrigger.SEGMENT_FLUSH) {
                 return null;
             }
-            return super.findMerges(infos);
+            return super.findMerges(trigger, infos);
         }
-
+        
         @Override
-        public MergeSpecification findForcedMerges(SegmentInfos infos, int maxSegmentCount, Map<SegmentInfo, Boolean> segmentsToMerge) throws IOException {
-            if (enableMerge.get() == Boolean.FALSE) {
-                return null;
-            }
-            return super.findForcedMerges(infos, maxSegmentCount, segmentsToMerge);
-        }
-
-        @Override
-        public MergeSpecification findForcedDeletesMerges(SegmentInfos infos) throws CorruptIndexException, IOException {
-            if (enableMerge.get() == Boolean.FALSE) {
-                return null;
-            }
-            return super.findForcedDeletesMerges(infos);
+        public MergePolicy clone() {
+            // Lucene IW makes a clone internally but since we hold on to this instance 
+            // the clone will just be the identity.
+            return this;
         }
     }
 }

@@ -31,7 +31,7 @@ import java.util.List;
 /**
  *
  */
-public class PercolateResponse implements ActionResponse, Iterable<String> {
+public class PercolateResponse extends ActionResponse implements Iterable<String> {
 
     private List<String> matches;
 
@@ -43,7 +43,7 @@ public class PercolateResponse implements ActionResponse, Iterable<String> {
         this.matches = matches;
     }
 
-    public List<String> matches() {
+    public List<String> getMatches() {
         return this.matches;
     }
 
@@ -54,18 +54,20 @@ public class PercolateResponse implements ActionResponse, Iterable<String> {
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
+        super.readFrom(in);
         int size = in.readVInt();
         matches = new ArrayList<String>(size);
         for (int i = 0; i < size; i++) {
-            matches.add(in.readUTF());
+            matches.add(in.readString());
         }
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
+        super.writeTo(out);
         out.writeVInt(matches.size());
         for (String match : matches) {
-            out.writeUTF(match);
+            out.writeString(match);
         }
     }
 }

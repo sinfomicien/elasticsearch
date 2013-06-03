@@ -20,7 +20,7 @@
 package org.elasticsearch.common.lucene.search;
 
 import org.apache.lucene.search.Scorer;
-import org.apache.lucene.search.Similarity;
+import org.apache.lucene.search.Weight;
 
 import java.io.IOException;
 
@@ -29,8 +29,8 @@ import java.io.IOException;
  */
 public class EmptyScorer extends Scorer {
 
-    public EmptyScorer(Similarity similarity) {
-        super(similarity);
+    public EmptyScorer(Weight weight) {
+        super(weight);
     }
 
     @Override
@@ -39,8 +39,13 @@ public class EmptyScorer extends Scorer {
     }
 
     @Override
+    public int freq() throws IOException {
+        return 0;
+    }
+
+    @Override
     public int docID() {
-        return NO_MORE_DOCS;
+        return -1;
     }
 
     @Override
@@ -51,5 +56,10 @@ public class EmptyScorer extends Scorer {
     @Override
     public int advance(int target) throws IOException {
         return NO_MORE_DOCS;
+    }
+
+    @Override
+    public long cost() {
+        return 0;
     }
 }

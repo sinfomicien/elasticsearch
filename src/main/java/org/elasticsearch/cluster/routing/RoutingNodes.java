@@ -19,22 +19,24 @@
 
 package org.elasticsearch.cluster.routing;
 
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Sets;
 import gnu.trove.map.hash.TObjectIntHashMap;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.block.ClusterBlocks;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.cluster.metadata.MetaData;
+import org.elasticsearch.cluster.node.DiscoveryNode;
+import org.elasticsearch.index.shard.ShardId;
 
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import static com.google.common.collect.Lists.newArrayList;
 import static com.google.common.collect.Maps.newHashMap;
 
 /**
- *
+ * {@link RoutingNodes} represents a copy the routing information contained in
+ * the {@link ClusterState cluster state}.
  */
 public class RoutingNodes implements Iterable<RoutingNode> {
 
@@ -50,6 +52,8 @@ public class RoutingNodes implements Iterable<RoutingNode> {
 
     private final List<MutableShardRouting> ignoredUnassigned = newArrayList();
 
+    private Set<ShardId> clearPostAllocationFlag;
+
     private final Map<String, TObjectIntHashMap<String>> nodesPerAttributeNames = new HashMap<String, TObjectIntHashMap<String>>();
 
     public RoutingNodes(ClusterState clusterState) {
@@ -57,6 +61,12 @@ public class RoutingNodes implements Iterable<RoutingNode> {
         this.blocks = clusterState.blocks();
         this.routingTable = clusterState.routingTable();
         Map<String, List<MutableShardRouting>> nodesToShards = newHashMap();
+        // fill in the nodeToShards with the "live" nodes
+        for (DiscoveryNode node : clusterState.nodes().dataNodes().values()) {
+            nodesToShards.put(node.id(), new ArrayList<MutableShardRouting>());
+        }
+
+        // fill in the inverse of node -> shards allocated
         for (IndexRoutingTable indexRoutingTable : routingTable.indicesRouting().values()) {
             for (IndexShardRoutingTable indexShard : indexRoutingTable) {
                 for (ShardRouting shard : indexShard) {
@@ -152,6 +162,25 @@ public class RoutingNodes implements Iterable<RoutingNode> {
 
     public Map<String, RoutingNode> getNodesToShards() {
         return nodesToShards();
+    }
+
+    /**
+     * Clears the post allocation flag for the provided shard id. NOTE: this should be used cautiously
+     * since it will lead to data loss of the primary shard is not allocated, as it will allocate
+     * the primary shard on a node and *not* expect it to have an existing valid index there.
+     */
+    public void addClearPostAllocationFlag(ShardId shardId) {
+        if (clearPostAllocationFlag == null) {
+            clearPostAllocationFlag = Sets.newHashSet();
+        }
+        clearPostAllocationFlag.add(shardId);
+    }
+
+    public Iterable<ShardId> getShardsToClearPostAllocationFlag() {
+        if (clearPostAllocationFlag == null) {
+            return ImmutableSet.of();
+        }
+        return clearPostAllocationFlag;
     }
 
     public RoutingNode node(String nodeId) {

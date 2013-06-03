@@ -104,17 +104,19 @@ public class MappingUpdatedAction extends TransportMasterNodeOperationAction<Map
         return new MappingUpdatedResponse();
     }
 
-    public static class MappingUpdatedResponse implements ActionResponse {
+    public static class MappingUpdatedResponse extends ActionResponse {
         @Override
         public void readFrom(StreamInput in) throws IOException {
+            super.readFrom(in);
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
+            super.writeTo(out);
         }
     }
 
-    public static class MappingUpdatedRequest extends MasterNodeOperationRequest {
+    public static class MappingUpdatedRequest extends MasterNodeOperationRequest<MappingUpdatedRequest> {
 
         private String index;
 
@@ -151,16 +153,16 @@ public class MappingUpdatedAction extends TransportMasterNodeOperationAction<Map
         @Override
         public void readFrom(StreamInput in) throws IOException {
             super.readFrom(in);
-            index = in.readUTF();
-            type = in.readUTF();
+            index = in.readString();
+            type = in.readString();
             mappingSource = CompressedString.readCompressedString(in);
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
             super.writeTo(out);
-            out.writeUTF(index);
-            out.writeUTF(type);
+            out.writeString(index);
+            out.writeString(type);
             mappingSource.writeTo(out);
         }
     }

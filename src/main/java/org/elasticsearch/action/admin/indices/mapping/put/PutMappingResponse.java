@@ -22,16 +22,13 @@ package org.elasticsearch.action.admin.indices.mapping.put;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
 
 import java.io.IOException;
 
 /**
  * The response of put mapping operation.
- *
- *
  */
-public class PutMappingResponse implements ActionResponse, Streamable {
+public class PutMappingResponse extends ActionResponse {
 
     private boolean acknowledged;
 
@@ -47,25 +44,19 @@ public class PutMappingResponse implements ActionResponse, Streamable {
      * Has the put mapping creation been acknowledged by all current cluster nodes within the
      * provided {@link PutMappingRequest#timeout(org.elasticsearch.common.unit.TimeValue)}.
      */
-    public boolean acknowledged() {
+    public boolean isAcknowledged() {
         return acknowledged;
-    }
-
-    /**
-     * Has the put mapping creation been acknowledged by all current cluster nodes within the
-     * provided {@link PutMappingRequest#timeout(org.elasticsearch.common.unit.TimeValue)}.
-     */
-    public boolean getAcknowledged() {
-        return acknowledged();
     }
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
+        super.readFrom(in);
         acknowledged = in.readBoolean();
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
+        super.writeTo(out);
         out.writeBoolean(acknowledged);
     }
 }

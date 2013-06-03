@@ -69,57 +69,32 @@ public class IndexingStats implements Streamable, ToXContent {
             deleteCurrent += stats.deleteCurrent;
         }
 
-        public long indexCount() {
-            return indexCount;
-        }
-
         public long getIndexCount() {
             return indexCount;
         }
 
-        public TimeValue indexTime() {
+        public TimeValue getIndexTime() {
             return new TimeValue(indexTimeInMillis);
-        }
-
-        public long indexTimeInMillis() {
-            return indexTimeInMillis;
         }
 
         public long getIndexTimeInMillis() {
             return indexTimeInMillis;
         }
 
-        public long indexCurrent() {
-            return indexCurrent;
-        }
-
         public long getIndexCurrent() {
             return indexCurrent;
-        }
-
-        public long deleteCount() {
-            return deleteCount;
         }
 
         public long getDeleteCount() {
             return deleteCount;
         }
 
-        public TimeValue deleteTime() {
+        public TimeValue getDeleteTime() {
             return new TimeValue(deleteTimeInMillis);
-        }
-
-        public long deleteTimeInMillis() {
-            return deleteTimeInMillis;
         }
 
         public long getDeleteTimeInMillis() {
             return deleteTimeInMillis;
-        }
-
-
-        public long deleteCurrent() {
-            return deleteCurrent;
         }
 
         public long getDeleteCurrent() {
@@ -157,12 +132,12 @@ public class IndexingStats implements Streamable, ToXContent {
         @Override
         public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
             builder.field(Fields.INDEX_TOTAL, indexCount);
-            builder.field(Fields.INDEX_TIME, indexTime().toString());
+            builder.field(Fields.INDEX_TIME, getIndexTime().toString());
             builder.field(Fields.INDEX_TIME_IN_MILLIS, indexTimeInMillis);
             builder.field(Fields.INDEX_CURRENT, indexCurrent);
 
             builder.field(Fields.DELETE_TOTAL, deleteCount);
-            builder.field(Fields.DELETE_TIME, deleteTime().toString());
+            builder.field(Fields.DELETE_TIME, getDeleteTime().toString());
             builder.field(Fields.DELETE_TIME_IN_MILLIS, deleteTimeInMillis);
             builder.field(Fields.DELETE_CURRENT, deleteCurrent);
 
@@ -208,12 +183,12 @@ public class IndexingStats implements Streamable, ToXContent {
         }
     }
 
-    public Stats total() {
+    public Stats getTotal() {
         return this.totalStats;
     }
 
     @Nullable
-    public Map<String, Stats> typeStats() {
+    public Map<String, Stats> getTypeStats() {
         return this.typeStats;
     }
 
@@ -260,7 +235,7 @@ public class IndexingStats implements Streamable, ToXContent {
             int size = in.readVInt();
             typeStats = new HashMap<String, Stats>(size);
             for (int i = 0; i < size; i++) {
-                typeStats.put(in.readUTF(), Stats.readStats(in));
+                typeStats.put(in.readString(), Stats.readStats(in));
             }
         }
     }
@@ -274,7 +249,7 @@ public class IndexingStats implements Streamable, ToXContent {
             out.writeBoolean(true);
             out.writeVInt(typeStats.size());
             for (Map.Entry<String, Stats> entry : typeStats.entrySet()) {
-                out.writeUTF(entry.getKey());
+                out.writeString(entry.getKey());
                 entry.getValue().writeTo(out);
             }
         }

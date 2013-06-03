@@ -20,22 +20,23 @@
 package org.elasticsearch.index.mapper.core;
 
 import org.apache.lucene.analysis.NumericTokenStream;
-import org.apache.lucene.document.AbstractField;
 import org.apache.lucene.document.Field;
-import org.apache.lucene.document.Fieldable;
-import org.apache.lucene.index.FieldInfo;
+import org.apache.lucene.document.FieldType;
 import org.apache.lucene.index.FieldInfo.IndexOptions;
 import org.apache.lucene.search.Filter;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.util.NumericUtils;
+import org.elasticsearch.common.Explicit;
 import org.elasticsearch.common.Nullable;
+import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.index.analysis.NamedAnalyzer;
-import org.elasticsearch.index.cache.field.data.FieldDataCache;
-import org.elasticsearch.index.field.data.FieldDataType;
+import org.elasticsearch.index.codec.postingsformat.PostingsFormatProvider;
+import org.elasticsearch.index.fielddata.IndexFieldDataService;
 import org.elasticsearch.index.mapper.*;
 import org.elasticsearch.index.mapper.internal.AllFieldMapper;
 import org.elasticsearch.index.query.QueryParseContext;
+import org.elasticsearch.index.similarity.SimilarityProvider;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -47,30 +48,32 @@ public abstract class NumberFieldMapper<T extends Number> extends AbstractFieldM
 
     public static class Defaults extends AbstractFieldMapper.Defaults {
         public static final int PRECISION_STEP = NumericUtils.PRECISION_STEP_DEFAULT;
-        public static final Field.Index INDEX = Field.Index.NOT_ANALYZED;
-        public static final boolean OMIT_NORMS = true;
-        public static final IndexOptions INDEX_OPTIONS = IndexOptions.DOCS_ONLY;
-        public static final String FUZZY_FACTOR = null;
-        public static final boolean IGNORE_MALFORMED = false;
+
+        public static final FieldType FIELD_TYPE = new FieldType(AbstractFieldMapper.Defaults.FIELD_TYPE);
+
+        static {
+            FIELD_TYPE.setTokenized(false);
+            FIELD_TYPE.setOmitNorms(true);
+            FIELD_TYPE.setIndexOptions(IndexOptions.DOCS_ONLY);
+            FIELD_TYPE.setStoreTermVectors(false);
+            FIELD_TYPE.freeze();
+        }
+
+        public static final Explicit<Boolean> IGNORE_MALFORMED = new Explicit<Boolean>(false, false);
     }
 
     public abstract static class Builder<T extends Builder, Y extends NumberFieldMapper> extends AbstractFieldMapper.Builder<T, Y> {
 
         protected int precisionStep = Defaults.PRECISION_STEP;
 
-        protected String fuzzyFactor = Defaults.FUZZY_FACTOR;
+        private Boolean ignoreMalformed;
 
-        protected boolean ignoreMalformed = Defaults.IGNORE_MALFORMED;
-
-        public Builder(String name) {
-            super(name);
-            this.index = Defaults.INDEX;
-            this.omitNorms = Defaults.OMIT_NORMS;
-            this.indexOptions = Defaults.INDEX_OPTIONS;
+        public Builder(String name, FieldType fieldType) {
+            super(name, fieldType);
         }
 
         @Override
-        public T store(Field.Store store) {
+        public T store(boolean store) {
             return super.store(store);
         }
 
@@ -94,27 +97,27 @@ public abstract class NumberFieldMapper<T extends Number> extends AbstractFieldM
             return builder;
         }
 
-        public T fuzzyFactor(String fuzzyFactor) {
-            this.fuzzyFactor = fuzzyFactor;
-            return builder;
-        }
-
         public T ignoreMalformed(boolean ignoreMalformed) {
             this.ignoreMalformed = ignoreMalformed;
             return builder;
         }
 
+        protected Explicit<Boolean> ignoreMalformed(BuilderContext context) {
+            if (ignoreMalformed != null) {
+                return new Explicit<Boolean>(ignoreMalformed, true);
+            }
+            if (context.indexSettings() != null) {
+                return new Explicit<Boolean>(context.indexSettings().getAsBoolean("index.mapping.ignore_malformed", Defaults.IGNORE_MALFORMED.value()), false);
+            }
+            return Defaults.IGNORE_MALFORMED;
+        }
     }
 
     protected int precisionStep;
 
-    protected String fuzzyFactor;
-
-    protected double dFuzzyFactor;
-
     protected Boolean includeInAll;
 
-    protected boolean ignoreMalformed;
+    protected Explicit<Boolean> ignoreMalformed;
 
     private ThreadLocal<NumericTokenStream> tokenStream = new ThreadLocal<NumericTokenStream>() {
         @Override
@@ -123,26 +126,18 @@ public abstract class NumberFieldMapper<T extends Number> extends AbstractFieldM
         }
     };
 
-    protected NumberFieldMapper(Names names, int precisionStep, @Nullable String fuzzyFactor,
-                                Field.Index index, Field.Store store,
-                                float boost, boolean omitNorms, IndexOptions indexOptions,
-                                boolean ignoreMalformed, NamedAnalyzer indexAnalyzer, NamedAnalyzer searchAnalyzer) {
-        super(names, index, store, Field.TermVector.NO, boost, boost != 1.0f || omitNorms, indexOptions, indexAnalyzer, searchAnalyzer);
+    protected NumberFieldMapper(Names names, int precisionStep, float boost, FieldType fieldType,
+                                Explicit<Boolean> ignoreMalformed, NamedAnalyzer indexAnalyzer,
+                                NamedAnalyzer searchAnalyzer, PostingsFormatProvider provider, SimilarityProvider similarity,
+                                @Nullable Settings fieldDataSettings) {
+        // LUCENE 4 UPGRADE: Since we can't do anything before the super call, we have to push the boost check down to subclasses
+        super(names, boost, fieldType, indexAnalyzer, searchAnalyzer, provider, similarity, fieldDataSettings);
         if (precisionStep <= 0 || precisionStep >= maxPrecisionStep()) {
             this.precisionStep = Integer.MAX_VALUE;
         } else {
             this.precisionStep = precisionStep;
         }
-        this.fuzzyFactor = fuzzyFactor;
-        this.dFuzzyFactor = parseFuzzyFactor(fuzzyFactor);
         this.ignoreMalformed = ignoreMalformed;
-    }
-
-    protected double parseFuzzyFactor(String fuzzyFactor) {
-        if (fuzzyFactor == null) {
-            return 1.0d;
-        }
-        return Double.parseDouble(fuzzyFactor);
     }
 
     @Override
@@ -166,7 +161,7 @@ public abstract class NumberFieldMapper<T extends Number> extends AbstractFieldM
     }
 
     @Override
-    protected Fieldable parseCreateField(ParseContext context) throws IOException {
+    protected Field parseCreateField(ParseContext context) throws IOException {
         RuntimeException e;
         try {
             return innerParseCreateField(context);
@@ -176,20 +171,20 @@ public abstract class NumberFieldMapper<T extends Number> extends AbstractFieldM
             e = e2;
         }
 
-        if (ignoreMalformed) {
+        if (ignoreMalformed.value()) {
             return null;
         } else {
             throw e;
         }
     }
 
-    protected abstract Fieldable innerParseCreateField(ParseContext context) throws IOException;
+    protected abstract Field innerParseCreateField(ParseContext context) throws IOException;
 
     /**
      * Use the field query created here when matching on numbers.
      */
     @Override
-    public boolean useFieldQueryWithQueryString() {
+    public boolean useTermQueryWithQueryString() {
         return true;
     }
 
@@ -198,48 +193,41 @@ public abstract class NumberFieldMapper<T extends Number> extends AbstractFieldM
      * way to execute it.
      */
     @Override
-    public Query fieldQuery(String value, @Nullable QueryParseContext context) {
+    public Query termQuery(Object value, @Nullable QueryParseContext context) {
         return rangeQuery(value, value, true, true, context);
     }
-
-    @Override
-    public abstract Query fuzzyQuery(String value, String minSim, int prefixLength, int maxExpansions);
-
-    @Override
-    public abstract Query fuzzyQuery(String value, double minSim, int prefixLength, int maxExpansions);
 
     /**
      * Numeric field level filter are basically range queries with same value and included. That's the recommended
      * way to execute it.
      */
     @Override
-    public Filter fieldFilter(String value, @Nullable QueryParseContext context) {
+    public Filter termFilter(Object value, @Nullable QueryParseContext context) {
         return rangeFilter(value, value, true, true, context);
     }
 
     @Override
-    public abstract Query rangeQuery(String lowerTerm, String upperTerm, boolean includeLower, boolean includeUpper, @Nullable QueryParseContext context);
+    public abstract Query rangeQuery(Object lowerTerm, Object upperTerm, boolean includeLower, boolean includeUpper, @Nullable QueryParseContext context);
 
     @Override
-    public abstract Filter rangeFilter(String lowerTerm, String upperTerm, boolean includeLower, boolean includeUpper, @Nullable QueryParseContext context);
+    public abstract Filter rangeFilter(Object lowerTerm, Object upperTerm, boolean includeLower, boolean includeUpper, @Nullable QueryParseContext context);
+
+    @Override
+    public abstract Query fuzzyQuery(String value, String minSim, int prefixLength, int maxExpansions, boolean transpositions);
 
     /**
      * A range filter based on the field data cache.
      */
-    public abstract Filter rangeFilter(FieldDataCache fieldDataCache, String lowerTerm, String upperTerm, boolean includeLower, boolean includeUpper, @Nullable QueryParseContext context);
+    public abstract Filter rangeFilter(IndexFieldDataService fieldData, Object lowerTerm, Object upperTerm, boolean includeLower, boolean includeUpper, @Nullable QueryParseContext context);
 
     /**
      * Override the default behavior (to return the string, and return the actual Number instance).
+     *
+     * @param value
      */
     @Override
-    public Object valueForSearch(Fieldable field) {
-        return value(field);
-    }
-
-    @Override
-    public String valueAsString(Fieldable field) {
-        Number num = value(field);
-        return num == null ? null : num.toString();
+    public Object valueForSearch(Object value) {
+        return value(value);
     }
 
     @Override
@@ -252,9 +240,9 @@ public abstract class NumberFieldMapper<T extends Number> extends AbstractFieldM
             NumberFieldMapper nfmMergeWith = (NumberFieldMapper) mergeWith;
             this.precisionStep = nfmMergeWith.precisionStep;
             this.includeInAll = nfmMergeWith.includeInAll;
-            this.fuzzyFactor = nfmMergeWith.fuzzyFactor;
-            this.dFuzzyFactor = parseFuzzyFactor(nfmMergeWith.fuzzyFactor);
-            this.ignoreMalformed = nfmMergeWith.ignoreMalformed;
+            if (nfmMergeWith.ignoreMalformed.explicit()) {
+                this.ignoreMalformed = nfmMergeWith.ignoreMalformed;
+            }
         }
     }
 
@@ -263,36 +251,21 @@ public abstract class NumberFieldMapper<T extends Number> extends AbstractFieldM
         tokenStream.remove();
     }
 
-    @Override
-    public abstract FieldDataType fieldDataType();
-
     protected NumericTokenStream popCachedStream() {
         return tokenStream.get();
     }
 
     // used to we can use a numeric field in a document that is then parsed twice!
-    public abstract static class CustomNumericField extends AbstractField {
+    public abstract static class CustomNumericField extends Field {
 
         protected final NumberFieldMapper mapper;
 
-        public CustomNumericField(NumberFieldMapper mapper, byte[] value) {
+        public CustomNumericField(NumberFieldMapper mapper, Number value, FieldType fieldType) {
+            super(mapper.names().indexName(), fieldType);
             this.mapper = mapper;
-            this.name = mapper.names().indexName();
-            fieldsData = value;
-
-            isIndexed = mapper.indexed();
-            isTokenized = mapper.indexed();
-            indexOptions = FieldInfo.IndexOptions.DOCS_ONLY;
-            omitNorms = mapper.omitNorms();
-
             if (value != null) {
-                isStored = true;
-                isBinary = true;
-                binaryLength = value.length;
-                binaryOffset = 0;
+                this.fieldsData = value;
             }
-
-            setStoreTermVector(Field.TermVector.NO);
         }
 
         @Override
@@ -311,6 +284,13 @@ public abstract class NumberFieldMapper<T extends Number> extends AbstractFieldM
     @Override
     protected void doXContentBody(XContentBuilder builder) throws IOException {
         super.doXContentBody(builder);
-        builder.field("ignore_malformed", ignoreMalformed);
+        if (ignoreMalformed.explicit()) {
+            builder.field("ignore_malformed", ignoreMalformed.value());
+        }
+    }
+    
+    @Override
+    public boolean isNumeric() {
+        return true;
     }
 }

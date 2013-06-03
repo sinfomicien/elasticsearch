@@ -21,8 +21,14 @@ package org.elasticsearch.search.facet.termsstats.strings;
 
 import com.google.common.collect.ImmutableList;
 import org.elasticsearch.common.CacheRecycler;
+import org.elasticsearch.common.bytes.BytesArray;
+import org.elasticsearch.common.bytes.BytesReference;
+import org.elasticsearch.common.bytes.HashedBytesArray;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.common.lucene.HashedBytesRef;
+import org.elasticsearch.common.text.BytesText;
+import org.elasticsearch.common.text.Text;
 import org.elasticsearch.common.trove.ExtTHashMap;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentBuilderString;
@@ -34,7 +40,7 @@ import java.util.*;
 
 public class InternalTermsStatsStringFacet extends InternalTermsStatsFacet {
 
-    private static final String STREAM_TYPE = "tTS";
+    private static final BytesReference STREAM_TYPE = new HashedBytesArray("tTS");
 
     public static void registerStream() {
         Streams.registerStream(STREAM, STREAM_TYPE);
@@ -42,13 +48,13 @@ public class InternalTermsStatsStringFacet extends InternalTermsStatsFacet {
 
     static Stream STREAM = new Stream() {
         @Override
-        public Facet readFacet(String type, StreamInput in) throws IOException {
+        public Facet readFacet(StreamInput in) throws IOException {
             return readTermsStatsFacet(in);
         }
     };
 
     @Override
-    public String streamType() {
+    public BytesReference streamType() {
         return STREAM_TYPE;
     }
 
@@ -57,14 +63,18 @@ public class InternalTermsStatsStringFacet extends InternalTermsStatsFacet {
 
     public static class StringEntry implements Entry {
 
-        String term;
+        Text term;
         long count;
         long totalCount;
         double total;
         double min;
         double max;
 
-        public StringEntry(String term, long count, long totalCount, double total, double min, double max) {
+        public StringEntry(HashedBytesRef term, long count, long totalCount, double total, double min, double max) {
+            this(new BytesText(new BytesArray(term.bytes)), count, totalCount, total, min, max);
+        }
+
+        public StringEntry(Text term, long count, long totalCount, double total, double min, double max) {
             this.term = term;
             this.count = count;
             this.totalCount = totalCount;
@@ -74,38 +84,18 @@ public class InternalTermsStatsStringFacet extends InternalTermsStatsFacet {
         }
 
         @Override
-        public String term() {
+        public Text getTerm() {
             return term;
         }
 
         @Override
-        public String getTerm() {
-            return term();
-        }
-
-        @Override
-        public Number termAsNumber() {
-            return Double.parseDouble(term);
-        }
-
-        @Override
         public Number getTermAsNumber() {
-            return termAsNumber();
-        }
-
-        @Override
-        public long count() {
-            return count;
+            return Double.parseDouble(term.string());
         }
 
         @Override
         public long getCount() {
-            return count();
-        }
-
-        @Override
-        public long totalCount() {
-            return this.totalCount;
+            return count;
         }
 
         @Override
@@ -114,37 +104,22 @@ public class InternalTermsStatsStringFacet extends InternalTermsStatsFacet {
         }
 
         @Override
-        public double min() {
+        public double getMin() {
             return this.min;
         }
 
         @Override
-        public double getMin() {
-            return min();
-        }
-
-        @Override
-        public double max() {
+        public double getMax() {
             return this.max;
         }
 
         @Override
-        public double getMax() {
-            return max();
-        }
-
-        @Override
-        public double total() {
+        public double getTotal() {
             return total;
         }
 
         @Override
-        public double getTotal() {
-            return total();
-        }
-
-        @Override
-        public double mean() {
+        public double getMean() {
             if (totalCount == 0) {
                 return 0;
             }
@@ -152,28 +127,18 @@ public class InternalTermsStatsStringFacet extends InternalTermsStatsFacet {
         }
 
         @Override
-        public double getMean() {
-            return mean();
-        }
-
-        @Override
-        public int compareTo(Entry o) {
-            return term.compareTo(o.term());
+        public int compareTo(Entry other) {
+            return term.compareTo(other.getTerm());
         }
     }
 
-    private String name;
-
     int requiredSize;
-
     long missing;
-
     Collection<StringEntry> entries = ImmutableList.of();
-
     ComparatorType comparatorType;
 
     public InternalTermsStatsStringFacet(String name, ComparatorType comparatorType, int requiredSize, Collection<StringEntry> entries, long missing) {
-        this.name = name;
+        super(name);
         this.comparatorType = comparatorType;
         this.requiredSize = requiredSize;
         this.entries = entries;
@@ -181,27 +146,7 @@ public class InternalTermsStatsStringFacet extends InternalTermsStatsFacet {
     }
 
     @Override
-    public String name() {
-        return this.name;
-    }
-
-    @Override
-    public String getName() {
-        return this.name;
-    }
-
-    @Override
-    public String type() {
-        return TYPE;
-    }
-
-    @Override
-    public String getType() {
-        return type();
-    }
-
-    @Override
-    public List<StringEntry> entries() {
+    public List<StringEntry> getEntries() {
         if (!(entries instanceof List)) {
             entries = ImmutableList.copyOf(entries);
         }
@@ -215,11 +160,6 @@ public class InternalTermsStatsStringFacet extends InternalTermsStatsFacet {
         return (List<StringEntry>) entries;
     }
 
-    @Override
-    public List<StringEntry> getEntries() {
-        return entries();
-    }
-
     @SuppressWarnings({"unchecked"})
     @Override
     public Iterator<Entry> iterator() {
@@ -227,17 +167,12 @@ public class InternalTermsStatsStringFacet extends InternalTermsStatsFacet {
     }
 
     @Override
-    public long missingCount() {
+    public long getMissingCount() {
         return this.missing;
     }
 
     @Override
-    public long getMissingCount() {
-        return missingCount();
-    }
-
-    @Override
-    public Facet reduce(String name, List<Facet> facets) {
+    public Facet reduce(List<Facet> facets) {
         if (facets.size() == 1) {
             if (requiredSize == 0) {
                 // we need to sort it here!
@@ -250,13 +185,13 @@ public class InternalTermsStatsStringFacet extends InternalTermsStatsFacet {
             return facets.get(0);
         }
         int missing = 0;
-        ExtTHashMap<String, StringEntry> map = CacheRecycler.popHashMap();
+        ExtTHashMap<Text, StringEntry> map = CacheRecycler.popHashMap();
         for (Facet facet : facets) {
             InternalTermsStatsStringFacet tsFacet = (InternalTermsStatsStringFacet) facet;
             missing += tsFacet.missing;
             for (Entry entry : tsFacet) {
                 StringEntry stringEntry = (StringEntry) entry;
-                StringEntry current = map.get(stringEntry.term());
+                StringEntry current = map.get(stringEntry.getTerm());
                 if (current != null) {
                     current.count += stringEntry.count;
                     current.totalCount += stringEntry.totalCount;
@@ -268,7 +203,7 @@ public class InternalTermsStatsStringFacet extends InternalTermsStatsFacet {
                         current.max = stringEntry.max;
                     }
                 } else {
-                    map.put(stringEntry.term(), stringEntry);
+                    map.put(stringEntry.getTerm(), stringEntry);
                 }
             }
         }
@@ -278,7 +213,7 @@ public class InternalTermsStatsStringFacet extends InternalTermsStatsFacet {
             StringEntry[] entries1 = map.values().toArray(new StringEntry[map.size()]);
             Arrays.sort(entries1, comparatorType.comparator());
             CacheRecycler.pushHashMap(map);
-            return new InternalTermsStatsStringFacet(name, comparatorType, requiredSize, Arrays.asList(entries1), missing);
+            return new InternalTermsStatsStringFacet(getName(), comparatorType, requiredSize, Arrays.asList(entries1), missing);
         } else {
             Object[] values = map.internalValues();
             Arrays.sort(values, (Comparator) comparatorType.comparator());
@@ -291,7 +226,7 @@ public class InternalTermsStatsStringFacet extends InternalTermsStatsFacet {
                 ordered.add(value);
             }
             CacheRecycler.pushHashMap(map);
-            return new InternalTermsStatsStringFacet(name, comparatorType, requiredSize, ordered, missing);
+            return new InternalTermsStatsStringFacet(getName(), comparatorType, requiredSize, ordered, missing);
         }
     }
 
@@ -310,19 +245,19 @@ public class InternalTermsStatsStringFacet extends InternalTermsStatsFacet {
 
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
-        builder.startObject(name);
+        builder.startObject(getName());
         builder.field(Fields._TYPE, InternalTermsStatsFacet.TYPE);
         builder.field(Fields.MISSING, missing);
         builder.startArray(Fields.TERMS);
         for (Entry entry : entries) {
             builder.startObject();
-            builder.field(Fields.TERM, entry.term());
-            builder.field(Fields.COUNT, entry.count());
-            builder.field(Fields.TOTAL_COUNT, entry.totalCount());
-            builder.field(Fields.MIN, entry.min());
-            builder.field(Fields.MAX, entry.max());
-            builder.field(Fields.TOTAL, entry.total());
-            builder.field(Fields.MEAN, entry.mean());
+            builder.field(Fields.TERM, entry.getTerm());
+            builder.field(Fields.COUNT, entry.getCount());
+            builder.field(Fields.TOTAL_COUNT, entry.getTotalCount());
+            builder.field(Fields.MIN, entry.getMin());
+            builder.field(Fields.MAX, entry.getMax());
+            builder.field(Fields.TOTAL, entry.getTotal());
+            builder.field(Fields.MEAN, entry.getMean());
             builder.endObject();
         }
         builder.endArray();
@@ -338,7 +273,7 @@ public class InternalTermsStatsStringFacet extends InternalTermsStatsFacet {
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
-        name = in.readUTF();
+        super.readFrom(in);
         comparatorType = ComparatorType.fromId(in.readByte());
         requiredSize = in.readVInt();
         missing = in.readVLong();
@@ -346,25 +281,25 @@ public class InternalTermsStatsStringFacet extends InternalTermsStatsFacet {
         int size = in.readVInt();
         entries = new ArrayList<StringEntry>(size);
         for (int i = 0; i < size; i++) {
-            entries.add(new StringEntry(in.readUTF(), in.readVLong(), in.readVLong(), in.readDouble(), in.readDouble(), in.readDouble()));
+            entries.add(new StringEntry(in.readText(), in.readVLong(), in.readVLong(), in.readDouble(), in.readDouble(), in.readDouble()));
         }
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeUTF(name);
+        super.writeTo(out);
         out.writeByte(comparatorType.id());
         out.writeVInt(requiredSize);
         out.writeVLong(missing);
 
         out.writeVInt(entries.size());
         for (Entry entry : entries) {
-            out.writeUTF(entry.term());
-            out.writeVLong(entry.count());
-            out.writeVLong(entry.totalCount());
-            out.writeDouble(entry.total());
-            out.writeDouble(entry.min());
-            out.writeDouble(entry.max());
+            out.writeText(entry.getTerm());
+            out.writeVLong(entry.getCount());
+            out.writeVLong(entry.getTotalCount());
+            out.writeDouble(entry.getTotal());
+            out.writeDouble(entry.getMin());
+            out.writeDouble(entry.getMax());
         }
     }
 }

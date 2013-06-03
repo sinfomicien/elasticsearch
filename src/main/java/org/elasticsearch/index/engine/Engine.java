@@ -21,7 +21,6 @@ package org.elasticsearch.index.engine;
 
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.Document;
-import org.apache.lucene.index.ExtendedIndexSearcher;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.Filter;
@@ -32,14 +31,13 @@ import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.component.CloseableComponent;
 import org.elasticsearch.common.lease.Releasable;
-import org.elasticsearch.common.lucene.uid.UidField;
+import org.elasticsearch.common.lucene.uid.Versions;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.index.VersionType;
 import org.elasticsearch.index.deletionpolicy.SnapshotIndexCommit;
 import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.ParsedDocument;
-import org.elasticsearch.index.mapper.internal.UidFieldMapper;
 import org.elasticsearch.index.shard.IndexShardComponent;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.index.translog.Translog;
@@ -114,6 +112,12 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
 
     <T> T snapshot(SnapshotHandler<T> snapshotHandler) throws EngineException;
 
+    /**
+     * Snapshots the index and returns a handle to it. Will always try and "commit" the
+     * lucene index to make sure we have a "fresh" copy of the files to snapshot.
+     */
+    SnapshotIndexCommit snapshotIndex() throws EngineException;
+
     void recover(RecoveryHandler recoveryHandler) throws EngineException;
 
     static interface FailedEngineListener {
@@ -141,8 +145,6 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
         void phase3(Translog.Snapshot snapshot) throws ElasticSearchException;
     }
 
-    /**
-     */
     static interface SnapshotHandler<T> {
 
         T snapshot(SnapshotIndexCommit snapshotIndexCommit, Translog.Snapshot translogSnapshot) throws EngineException;
@@ -152,7 +154,7 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
 
         IndexReader reader();
 
-        ExtendedIndexSearcher searcher();
+        IndexSearcher searcher();
     }
 
     static class SimpleSearcher implements Searcher {
@@ -169,8 +171,8 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
         }
 
         @Override
-        public ExtendedIndexSearcher searcher() {
-            return (ExtendedIndexSearcher) searcher;
+        public IndexSearcher searcher() {
+            return searcher;
         }
 
         @Override
@@ -211,9 +213,28 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
 
     static class Flush {
 
-        private boolean full = false;
+        public static enum Type {
+            /**
+             * A flush that causes a new writer to be created.
+             */
+            NEW_WRITER,
+            /**
+             * A flush that just commits the writer, without cleaning the translog.
+             */
+            COMMIT,
+            /**
+             * A flush that does a commit, as well as clears the translog.
+             */
+            COMMIT_TRANSLOG
+        }
+
+        private Type type = Type.COMMIT_TRANSLOG;
         private boolean refresh = false;
         private boolean force = false;
+        /**
+         * Should the flush operation wait if there is an ongoing flush operation.
+         */
+        private boolean waitIfOngoing = false;
 
         /**
          * Should a refresh be performed after flushing. Defaults to <tt>false</tt>.
@@ -230,18 +251,15 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
             return this;
         }
 
-        /**
-         * Should a "full" flush be issued, basically cleaning as much memory as possible.
-         */
-        public boolean full() {
-            return this.full;
+        public Type type() {
+            return this.type;
         }
 
         /**
          * Should a "full" flush be issued, basically cleaning as much memory as possible.
          */
-        public Flush full(boolean full) {
-            this.full = full;
+        public Flush type(Type type) {
+            this.type = type;
             return this;
         }
 
@@ -254,9 +272,18 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
             return this;
         }
 
+        public boolean waitIfOngoing() {
+            return this.waitIfOngoing;
+        }
+
+        public Flush waitIfOngoing(boolean waitIfOngoing) {
+            this.waitIfOngoing = waitIfOngoing;
+            return this;
+        }
+
         @Override
         public String toString() {
-            return "full[" + full + "], refresh[" + refresh + "], force[" + force + "]";
+            return "type[" + type + "], refresh[" + refresh + "], force[" + force + "]";
         }
     }
 
@@ -365,6 +392,7 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
             this.doc = doc;
         }
 
+        @Override
         public DocumentMapper docMapper() {
             return this.docMapper;
         }
@@ -384,6 +412,7 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
             return this.origin;
         }
 
+        @Override
         public ParsedDocument parsedDoc() {
             return this.doc;
         }
@@ -418,6 +447,7 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
 
         public Create version(long version) {
             this.version = version;
+            this.doc.version().setLongValue(version);
             return this;
         }
 
@@ -434,6 +464,7 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
             return this.doc.parent();
         }
 
+        @Override
         public List<Document> docs() {
             return this.doc.docs();
         }
@@ -445,11 +476,6 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
         public BytesReference source() {
             return this.doc.source();
         }
-
-        public UidField uidField() {
-            return (UidField) doc.rootDoc().getFieldable(UidFieldMapper.NAME);
-        }
-
 
         public Create startTime(long startTime) {
             this.startTime = startTime;
@@ -493,6 +519,7 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
             this.doc = doc;
         }
 
+        @Override
         public DocumentMapper docMapper() {
             return this.docMapper;
         }
@@ -516,12 +543,14 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
             return this.uid;
         }
 
+        @Override
         public ParsedDocument parsedDoc() {
             return this.doc;
         }
 
         public Index version(long version) {
             this.version = version;
+            doc.version().setLongValue(version);
             return this;
         }
 
@@ -538,6 +567,7 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
             return this.versionType;
         }
 
+        @Override
         public List<Document> docs() {
             return this.doc.docs();
         }
@@ -572,10 +602,6 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
 
         public BytesReference source() {
             return this.doc.source();
-        }
-
-        public UidField uidField() {
-            return (UidField) doc.rootDoc().getFieldable(UidFieldMapper.NAME);
         }
 
         public Index startTime(long startTime) {
@@ -707,16 +733,18 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
         private final String[] filteringAliases;
         private final Filter aliasFilter;
         private final String[] types;
+        private final Filter parentFilter;
 
         private long startTime;
         private long endTime;
 
-        public DeleteByQuery(Query query, BytesReference source, @Nullable String[] filteringAliases, @Nullable Filter aliasFilter, String... types) {
+        public DeleteByQuery(Query query, BytesReference source, @Nullable String[] filteringAliases, @Nullable Filter aliasFilter, Filter parentFilter, String... types) {
             this.query = query;
             this.source = source;
             this.types = types;
             this.filteringAliases = filteringAliases;
             this.aliasFilter = aliasFilter;
+            this.parentFilter = parentFilter;
         }
 
         public Query query() {
@@ -737,6 +765,14 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
 
         public Filter aliasFilter() {
             return aliasFilter;
+        }
+
+        public boolean nested() {
+            return parentFilter != null;
+        }
+
+        public Filter parentFilter() {
+            return parentFilter;
         }
 
         public DeleteByQuery startTime(long startTime) {
@@ -797,7 +833,7 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
         private final boolean exists;
         private final long version;
         private final Translog.Source source;
-        private final UidField.DocIdAndVersion docIdAndVersion;
+        private final Versions.DocIdAndVersion docIdAndVersion;
         private final Searcher searcher;
 
         public static final GetResult NOT_EXISTS = new GetResult(false, -1, null);
@@ -810,7 +846,7 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
             this.searcher = null;
         }
 
-        public GetResult(Searcher searcher, UidField.DocIdAndVersion docIdAndVersion) {
+        public GetResult(Searcher searcher, Versions.DocIdAndVersion docIdAndVersion) {
             this.exists = true;
             this.source = null;
             this.version = docIdAndVersion.version;
@@ -835,7 +871,7 @@ public interface Engine extends IndexShardComponent, CloseableComponent {
             return this.searcher;
         }
 
-        public UidField.DocIdAndVersion docIdAndVersion() {
+        public Versions.DocIdAndVersion docIdAndVersion() {
             return docIdAndVersion;
         }
 

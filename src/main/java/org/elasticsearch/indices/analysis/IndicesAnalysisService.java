@@ -19,7 +19,9 @@
 
 package org.elasticsearch.indices.analysis;
 
-import org.apache.lucene.analysis.*;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.Tokenizer;
 import org.apache.lucene.analysis.ar.ArabicAnalyzer;
 import org.apache.lucene.analysis.ar.ArabicStemFilter;
 import org.apache.lucene.analysis.bg.BulgarianAnalyzer;
@@ -29,6 +31,7 @@ import org.apache.lucene.analysis.ca.CatalanAnalyzer;
 import org.apache.lucene.analysis.charfilter.HTMLStripCharFilter;
 import org.apache.lucene.analysis.cjk.CJKAnalyzer;
 import org.apache.lucene.analysis.cn.ChineseAnalyzer;
+import org.apache.lucene.analysis.core.*;
 import org.apache.lucene.analysis.cz.CzechAnalyzer;
 import org.apache.lucene.analysis.cz.CzechStemFilter;
 import org.apache.lucene.analysis.da.DanishAnalyzer;
@@ -37,11 +40,11 @@ import org.apache.lucene.analysis.de.GermanStemFilter;
 import org.apache.lucene.analysis.el.GreekAnalyzer;
 import org.apache.lucene.analysis.en.EnglishAnalyzer;
 import org.apache.lucene.analysis.en.KStemFilter;
+import org.apache.lucene.analysis.en.PorterStemFilter;
 import org.apache.lucene.analysis.es.SpanishAnalyzer;
 import org.apache.lucene.analysis.eu.BasqueAnalyzer;
 import org.apache.lucene.analysis.fa.PersianAnalyzer;
 import org.apache.lucene.analysis.fi.FinnishAnalyzer;
-import org.apache.lucene.analysis.fr.ElisionFilter;
 import org.apache.lucene.analysis.fr.FrenchAnalyzer;
 import org.apache.lucene.analysis.fr.FrenchStemFilter;
 import org.apache.lucene.analysis.ga.IrishAnalyzer;
@@ -66,7 +69,6 @@ import org.apache.lucene.analysis.pt.PortugueseAnalyzer;
 import org.apache.lucene.analysis.reverse.ReverseStringFilter;
 import org.apache.lucene.analysis.ro.RomanianAnalyzer;
 import org.apache.lucene.analysis.ru.RussianAnalyzer;
-import org.apache.lucene.analysis.ru.RussianStemFilter;
 import org.apache.lucene.analysis.shingle.ShingleFilter;
 import org.apache.lucene.analysis.snowball.SnowballAnalyzer;
 import org.apache.lucene.analysis.snowball.SnowballFilter;
@@ -74,6 +76,7 @@ import org.apache.lucene.analysis.standard.*;
 import org.apache.lucene.analysis.sv.SwedishAnalyzer;
 import org.apache.lucene.analysis.th.ThaiAnalyzer;
 import org.apache.lucene.analysis.tr.TurkishAnalyzer;
+import org.apache.lucene.analysis.util.ElisionFilter;
 import org.elasticsearch.ElasticSearchIllegalStateException;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
@@ -308,11 +311,7 @@ public class IndicesAnalysisService extends AbstractComponent {
 
             @Override
             public Tokenizer create(Reader reader) {
-                try {
-                    return new PatternTokenizer(reader, Regex.compile("\\W+", null), -1);
-                } catch (IOException e) {
-                    throw new ElasticSearchIllegalStateException("failed to parse default pattern");
-                }
+                return new PatternTokenizer(reader, Regex.compile("\\W+", null), -1);
             }
         }));
 
@@ -325,11 +324,14 @@ public class IndicesAnalysisService extends AbstractComponent {
 
             @Override
             public TokenStream create(TokenStream tokenStream) {
-                return new WordDelimiterFilter(tokenStream, WordDelimiterIterator.DEFAULT_WORD_DELIM_TABLE,
-                        1, 1, 0, 0, 0, 1, 0, 1, 1, null);
+                return new WordDelimiterFilter(tokenStream, 
+                        WordDelimiterFilter.GENERATE_WORD_PARTS |
+                        WordDelimiterFilter.GENERATE_NUMBER_PARTS |
+                        WordDelimiterFilter.SPLIT_ON_CASE_CHANGE | 
+                        WordDelimiterFilter.SPLIT_ON_NUMERICS |
+                        WordDelimiterFilter.STEM_ENGLISH_POSSESSIVE, null);
             }
         }));
-
         tokenFilterFactories.put("stop", new PreBuiltTokenFilterFactoryFactory(new TokenFilterFactory() {
             @Override
             public String name() {
@@ -498,17 +500,7 @@ public class IndicesAnalysisService extends AbstractComponent {
             }
         }));
 
-        tokenFilterFactories.put("shingle", new PreBuiltTokenFilterFactoryFactory(new TokenFilterFactory() {
-            @Override
-            public String name() {
-                return "shingle";
-            }
-
-            @Override
-            public TokenStream create(TokenStream tokenStream) {
-                return new ShingleFilter(tokenStream, ShingleFilter.DEFAULT_MAX_SHINGLE_SIZE);
-            }
-        }));
+        tokenFilterFactories.put("shingle", new PreBuiltTokenFilterFactoryFactory(new ShingleTokenFilterFactory.Factory("shingle")));
 
         tokenFilterFactories.put("unique", new PreBuiltTokenFilterFactoryFactory(new TokenFilterFactory() {
             @Override
@@ -565,7 +557,8 @@ public class IndicesAnalysisService extends AbstractComponent {
 
             @Override
             public TokenStream create(TokenStream tokenStream) {
-                return new ElisionFilter(Lucene.ANALYZER_VERSION, tokenStream);
+                // LUCENE 4 UPGRADE: French default for now, make set of articles configurable
+                return new ElisionFilter(tokenStream, FrenchAnalyzer.DEFAULT_ARTICLES);
             }
         }));
         tokenFilterFactories.put("arabic_stem", new PreBuiltTokenFilterFactoryFactory(new TokenFilterFactory() {
@@ -642,7 +635,18 @@ public class IndicesAnalysisService extends AbstractComponent {
 
             @Override
             public TokenStream create(TokenStream tokenStream) {
-                return new RussianStemFilter(tokenStream);
+                return new SnowballFilter(tokenStream, "Russian");
+            }
+        }));
+        tokenFilterFactories.put("keyword_repeat", new PreBuiltTokenFilterFactoryFactory(new TokenFilterFactory() {
+            @Override
+            public String name() {
+                return "keyword_repeat";
+            }
+
+            @Override
+            public TokenStream create(TokenStream tokenStream) {
+                return new KeywordRepeatFilter(tokenStream);
             }
         }));
 
@@ -654,7 +658,7 @@ public class IndicesAnalysisService extends AbstractComponent {
             }
 
             @Override
-            public CharStream create(CharStream tokenStream) {
+            public Reader create(Reader tokenStream) {
                 return new HTMLStripCharFilter(tokenStream);
             }
         }));
@@ -666,7 +670,7 @@ public class IndicesAnalysisService extends AbstractComponent {
             }
 
             @Override
-            public CharStream create(CharStream tokenStream) {
+            public Reader create(Reader tokenStream) {
                 return new HTMLStripCharFilter(tokenStream);
             }
         }));

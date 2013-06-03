@@ -21,9 +21,9 @@ package org.elasticsearch.index.aliases;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.UnmodifiableIterator;
+import org.apache.lucene.queries.FilterClause;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.Filter;
-import org.apache.lucene.search.FilterClause;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.compress.CompressedString;
 import org.elasticsearch.common.inject.Inject;
@@ -39,6 +39,7 @@ import org.elasticsearch.indices.AliasFilterParsingException;
 import org.elasticsearch.indices.InvalidAliasNameException;
 
 import java.io.IOException;
+import java.util.Map;
 
 import static org.elasticsearch.common.collect.MapBuilder.newMapBuilder;
 
@@ -67,8 +68,18 @@ public class IndexAliasesService extends AbstractIndexComponent implements Itera
         return aliases.get(alias);
     }
 
+    public IndexAlias create(String alias, @Nullable CompressedString filter) {
+        return new IndexAlias(alias, filter, parse(alias, filter));
+    }
+
     public void add(String alias, @Nullable CompressedString filter) {
         add(new IndexAlias(alias, filter, parse(alias, filter)));
+    }
+
+    public void addAll(Map<String, IndexAlias> aliases) {
+        synchronized (mutex) {
+            this.aliases = newMapBuilder(this.aliases).putAll(aliases).immutableMap();
+        }
     }
 
     /**
@@ -104,11 +115,11 @@ public class IndexAliasesService extends AbstractIndexComponent implements Itera
                     return null;
                 }
             }
-            if (combined.getShouldFilters().size() == 0) {
+            if (combined.clauses().size() == 0) {
                 return null;
             }
-            if (combined.getShouldFilters().size() == 1) {
-                return combined.getShouldFilters().get(0);
+            if (combined.clauses().size() == 1) {
+                return combined.clauses().get(0).getFilter();
             }
             return combined;
         }

@@ -77,10 +77,10 @@ public class TransportBenchmark {
 
         final DiscoveryNode node = new DiscoveryNode("server", serverTransportService.boundAddress().publishAddress());
 
-        serverTransportService.registerHandler("benchmark", new BaseTransportRequestHandler<BenchmarkMessage>() {
+        serverTransportService.registerHandler("benchmark", new BaseTransportRequestHandler<BenchmarkMessageRequest>() {
             @Override
-            public BenchmarkMessage newInstance() {
-                return new BenchmarkMessage();
+            public BenchmarkMessageRequest newInstance() {
+                return new BenchmarkMessageRequest();
             }
 
             @Override
@@ -89,19 +89,19 @@ public class TransportBenchmark {
             }
 
             @Override
-            public void messageReceived(BenchmarkMessage request, TransportChannel channel) throws Exception {
-                channel.sendResponse(request);
+            public void messageReceived(BenchmarkMessageRequest request, TransportChannel channel) throws Exception {
+                channel.sendResponse(new BenchmarkMessageResponse(request));
             }
         });
 
         clientTransportService.connectToNode(node);
 
         for (int i = 0; i < 10000; i++) {
-            BenchmarkMessage message = new BenchmarkMessage(1, payload);
-            clientTransportService.submitRequest(node, "benchmark", message, new BaseTransportResponseHandler<BenchmarkMessage>() {
+            BenchmarkMessageRequest message = new BenchmarkMessageRequest(1, payload);
+            clientTransportService.submitRequest(node, "benchmark", message, new BaseTransportResponseHandler<BenchmarkMessageResponse>() {
                 @Override
-                public BenchmarkMessage newInstance() {
-                    return new BenchmarkMessage();
+                public BenchmarkMessageResponse newInstance() {
+                    return new BenchmarkMessageResponse();
                 }
 
                 @Override
@@ -110,7 +110,7 @@ public class TransportBenchmark {
                 }
 
                 @Override
-                public void handleResponse(BenchmarkMessage response) {
+                public void handleResponse(BenchmarkMessageResponse response) {
                 }
 
                 @Override
@@ -129,11 +129,11 @@ public class TransportBenchmark {
                 public void run() {
                     for (int j = 0; j < NUMBER_OF_ITERATIONS; j++) {
                         final long id = idGenerator.incrementAndGet();
-                        BenchmarkMessage message = new BenchmarkMessage(id, payload);
-                        BaseTransportResponseHandler<BenchmarkMessage> handler = new BaseTransportResponseHandler<BenchmarkMessage>() {
+                        BenchmarkMessageRequest request = new BenchmarkMessageRequest(id, payload);
+                        BaseTransportResponseHandler<BenchmarkMessageResponse> handler = new BaseTransportResponseHandler<BenchmarkMessageResponse>() {
                             @Override
-                            public BenchmarkMessage newInstance() {
-                                return new BenchmarkMessage();
+                            public BenchmarkMessageResponse newInstance() {
+                                return new BenchmarkMessageResponse();
                             }
 
                             @Override
@@ -142,9 +142,9 @@ public class TransportBenchmark {
                             }
 
                             @Override
-                            public void handleResponse(BenchmarkMessage response) {
-                                if (response.id != id) {
-                                    System.out.println("NO ID MATCH [" + response.id + "] and [" + id + "]");
+                            public void handleResponse(BenchmarkMessageResponse response) {
+                                if (response.id() != id) {
+                                    System.out.println("NO ID MATCH [" + response.id() + "] and [" + id + "]");
                                 }
                                 latch.countDown();
                             }
@@ -157,9 +157,9 @@ public class TransportBenchmark {
                         };
 
                         if (waitForRequest) {
-                            clientTransportService.submitRequest(node, "benchmark", message, handler).txGet();
+                            clientTransportService.submitRequest(node, "benchmark", request, handler).txGet();
                         } else {
-                            clientTransportService.sendRequest(node, "benchmark", message, handler);
+                            clientTransportService.sendRequest(node, "benchmark", request, handler);
                         }
                     }
                 }

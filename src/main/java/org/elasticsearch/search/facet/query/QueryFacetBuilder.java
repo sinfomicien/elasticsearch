@@ -23,14 +23,14 @@ import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.index.query.FilterBuilder;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.search.builder.SearchSourceBuilderException;
-import org.elasticsearch.search.facet.AbstractFacetBuilder;
+import org.elasticsearch.search.facet.FacetBuilder;
 
 import java.io.IOException;
 
 /**
  *
  */
-public class QueryFacetBuilder extends AbstractFacetBuilder {
+public class QueryFacetBuilder extends FacetBuilder {
 
     private QueryBuilder query;
 
@@ -44,15 +44,6 @@ public class QueryFacetBuilder extends AbstractFacetBuilder {
     @Override
     public QueryFacetBuilder global(boolean global) {
         super.global(global);
-        return this;
-    }
-
-    /**
-     * Marks the facet to run in a specific scope.
-     */
-    @Override
-    public QueryFacetBuilder scope(String scope) {
-        super.scope(scope);
         return this;
     }
 

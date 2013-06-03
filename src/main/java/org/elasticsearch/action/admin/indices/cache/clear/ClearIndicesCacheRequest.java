@@ -29,13 +29,15 @@ import java.io.IOException;
 /**
  *
  */
-public class ClearIndicesCacheRequest extends BroadcastOperationRequest {
+public class ClearIndicesCacheRequest extends BroadcastOperationRequest<ClearIndicesCacheRequest> {
 
     private boolean filterCache = false;
     private boolean fieldDataCache = false;
     private boolean idCache = false;
-    private boolean bloomCache = false;
+    private boolean recycler = false;
     private String[] fields = null;
+    private String[] filterKeys = null;
+    
 
     ClearIndicesCacheRequest() {
     }
@@ -44,24 +46,6 @@ public class ClearIndicesCacheRequest extends BroadcastOperationRequest {
         super(indices);
         // we want to do the refresh in parallel on local shards...
         operationThreading(BroadcastOperationThreading.THREAD_PER_SHARD);
-    }
-
-    /**
-     * Should the listener be called on a separate thread if needed.
-     */
-    @Override
-    public ClearIndicesCacheRequest listenerThreaded(boolean threadedListener) {
-        super.listenerThreaded(threadedListener);
-        return this;
-    }
-
-    /**
-     * Controls the operation threading model.
-     */
-    @Override
-    public ClearIndicesCacheRequest operationThreading(BroadcastOperationThreading operationThreading) {
-        super.operationThreading(operationThreading);
-        return this;
     }
 
     public boolean filterCache() {
@@ -91,21 +75,30 @@ public class ClearIndicesCacheRequest extends BroadcastOperationRequest {
         return this.fields;
     }
 
+    public ClearIndicesCacheRequest filterKeys(String... filterKeys) {
+        this.filterKeys = filterKeys;
+        return this;
+    }
+
+    public String[] filterKeys() {
+        return this.filterKeys;
+    }
+
     public boolean idCache() {
         return this.idCache;
+    }
+    
+    public ClearIndicesCacheRequest recycler(boolean recycler) {
+        this.recycler = recycler;
+        return this;
+    }
+    
+    public boolean recycler() {
+        return this.recycler;
     }
 
     public ClearIndicesCacheRequest idCache(boolean idCache) {
         this.idCache = idCache;
-        return this;
-    }
-
-    public boolean bloomCache() {
-        return this.bloomCache;
-    }
-
-    public ClearIndicesCacheRequest bloomCache(boolean bloomCache) {
-        this.bloomCache = bloomCache;
         return this;
     }
 
@@ -114,14 +107,9 @@ public class ClearIndicesCacheRequest extends BroadcastOperationRequest {
         filterCache = in.readBoolean();
         fieldDataCache = in.readBoolean();
         idCache = in.readBoolean();
-        bloomCache = in.readBoolean();
-        int size = in.readVInt();
-        if (size > 0) {
-            fields = new String[size];
-            for (int i = 0; i < size; i++) {
-                fields[i] = in.readUTF();
-            }
-        }
+        recycler = in.readBoolean();
+        fields = in.readStringArray();
+        filterKeys = in.readStringArray();
     }
 
     public void writeTo(StreamOutput out) throws IOException {
@@ -129,14 +117,10 @@ public class ClearIndicesCacheRequest extends BroadcastOperationRequest {
         out.writeBoolean(filterCache);
         out.writeBoolean(fieldDataCache);
         out.writeBoolean(idCache);
-        out.writeBoolean(bloomCache);
-        if (fields == null) {
-            out.writeVInt(0);
-        } else {
-            out.writeVInt(fields.length);
-            for (String field : fields) {
-                out.writeUTF(field);
-            }
-        }
+        out.writeBoolean(recycler);
+        out.writeStringArrayNullable(fields);
+        out.writeStringArrayNullable(filterKeys);
     }
+
+   
 }

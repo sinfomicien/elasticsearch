@@ -21,23 +21,22 @@ package org.elasticsearch.search.controller;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import com.google.common.collect.Ordering;
-import gnu.trove.impl.Constants;
-import gnu.trove.map.hash.TObjectIntHashMap;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.*;
 import org.apache.lucene.util.PriorityQueue;
 import org.elasticsearch.common.Nullable;
+import org.elasticsearch.common.collect.XMaps;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
+import org.elasticsearch.common.lucene.search.ShardFieldDocSortedHitQueue;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.trove.ExtTIntArrayList;
 import org.elasticsearch.search.SearchShardTarget;
 import org.elasticsearch.search.dfs.AggregatedDfs;
 import org.elasticsearch.search.dfs.DfsSearchResult;
 import org.elasticsearch.search.facet.Facet;
-import org.elasticsearch.search.facet.FacetProcessors;
+import org.elasticsearch.search.facet.InternalFacet;
 import org.elasticsearch.search.facet.InternalFacets;
 import org.elasticsearch.search.fetch.FetchSearchResult;
 import org.elasticsearch.search.fetch.FetchSearchResultProvider;
@@ -46,9 +45,11 @@ import org.elasticsearch.search.internal.InternalSearchHits;
 import org.elasticsearch.search.internal.InternalSearchResponse;
 import org.elasticsearch.search.query.QuerySearchResult;
 import org.elasticsearch.search.query.QuerySearchResultProvider;
+import org.elasticsearch.search.suggest.Suggest;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -70,14 +71,11 @@ public class SearchPhaseController extends AbstractComponent {
 
     private static final ShardDoc[] EMPTY = new ShardDoc[0];
 
-    private final FacetProcessors facetProcessors;
-
     private final boolean optimizeSingleShard;
 
     @Inject
-    public SearchPhaseController(Settings settings, FacetProcessors facetProcessors) {
+    public SearchPhaseController(Settings settings) {
         super(settings);
-        this.facetProcessors = facetProcessors;
         this.optimizeSingleShard = componentSettings.getAsBoolean("optimize_single_shard", true);
     }
 
@@ -86,15 +84,50 @@ public class SearchPhaseController extends AbstractComponent {
     }
 
     public AggregatedDfs aggregateDfs(Iterable<DfsSearchResult> results) {
-        TObjectIntHashMap<Term> dfMap = new TObjectIntHashMap<Term>(Constants.DEFAULT_CAPACITY, Constants.DEFAULT_LOAD_FACTOR, -1);
+        Map<Term, TermStatistics> termStatistics = XMaps.newNoNullKeysMap();
+        Map<String, CollectionStatistics> fieldStatistics = XMaps.newNoNullKeysMap();
         long aggMaxDoc = 0;
         for (DfsSearchResult result : results) {
-            for (int i = 0; i < result.freqs().length; i++) {
-                dfMap.adjustOrPutValue(result.terms()[i], result.freqs()[i], result.freqs()[i]);
+            final Term[] terms = result.terms();
+            final TermStatistics[] stats = result.termStatistics();
+            assert terms.length == stats.length;
+            for (int i = 0; i < terms.length; i++) {
+                assert terms[i] != null;
+                TermStatistics existing = termStatistics.get(terms[i]);
+                if (existing != null) {
+                    assert terms[i].bytes().equals(existing.term());
+                    // totalTermFrequency is an optional statistic we need to check if either one or both
+                    // are set to -1 which means not present and then set it globally to -1
+                    termStatistics.put(terms[i], new TermStatistics(existing.term(),
+                        existing.docFreq() + stats[i].docFreq(), 
+                        optionalSum(existing.totalTermFreq(), stats[i].totalTermFreq())));
+                } else {
+                    termStatistics.put(terms[i], stats[i]);
+                }
+
+            }
+            for (Map.Entry<String, CollectionStatistics> entry : result.fieldStatistics().entrySet()) {
+                assert entry.getKey() != null;
+                CollectionStatistics existing = fieldStatistics.get(entry.getKey());
+                if (existing != null) {
+                    CollectionStatistics merged = new CollectionStatistics(
+                            entry.getKey(), existing.maxDoc() + entry.getValue().maxDoc(),
+                            optionalSum(existing.docCount(), entry.getValue().docCount()),
+                            optionalSum(existing.sumTotalTermFreq(), entry.getValue().sumTotalTermFreq()),
+                            optionalSum(existing.sumDocFreq(), entry.getValue().sumDocFreq())
+                    );
+                    fieldStatistics.put(entry.getKey(), merged);
+                } else {
+                    fieldStatistics.put(entry.getKey(), entry.getValue());
+                }
             }
             aggMaxDoc += result.maxDoc();
         }
-        return new AggregatedDfs(dfMap, aggMaxDoc);
+        return new AggregatedDfs(termStatistics, fieldStatistics, aggMaxDoc);
+    }
+    
+    private static long optionalSum(long left, long right) {
+       return Math.min(left, right) == -1 ? -1 : left + right;
     }
 
     public ShardDoc[] sortDocs(Collection<? extends QuerySearchResultProvider> results1) {
@@ -173,7 +206,7 @@ public class SearchPhaseController extends AbstractComponent {
                         if (fDoc.fields[i] != null) {
                             allValuesAreNull = false;
                             if (fDoc.fields[i] instanceof String) {
-                                fieldDocs.fields[i] = new SortField(fieldDocs.fields[i].getField(), SortField.STRING, fieldDocs.fields[i].getReverse());
+                                fieldDocs.fields[i] = new SortField(fieldDocs.fields[i].getField(), SortField.Type.STRING, fieldDocs.fields[i].getReverse());
                             }
                             resolvedField = true;
                             break;
@@ -185,7 +218,7 @@ public class SearchPhaseController extends AbstractComponent {
                 }
                 if (!resolvedField && allValuesAreNull && fieldDocs.fields[i].getField() != null) {
                     // we did not manage to resolve a field (and its not score or doc, which have no field), and all the fields are null (which can only happen for STRING), make it a STRING
-                    fieldDocs.fields[i] = new SortField(fieldDocs.fields[i].getField(), SortField.STRING, fieldDocs.fields[i].getReverse());
+                    fieldDocs.fields[i] = new SortField(fieldDocs.fields[i].getField(), SortField.Type.STRING, fieldDocs.fields[i].getReverse());
                 }
             }
             queue = new ShardFieldDocSortedHitQueue(fieldDocs.fields, queueSize);
@@ -242,7 +275,7 @@ public class SearchPhaseController extends AbstractComponent {
     }
 
     public Map<SearchShardTarget, ExtTIntArrayList> docIdsToLoad(ShardDoc[] shardDocs) {
-        Map<SearchShardTarget, ExtTIntArrayList> result = Maps.newHashMap();
+        Map<SearchShardTarget, ExtTIntArrayList> result = XMaps.newMap();
         for (ShardDoc shardDoc : shardDocs) {
             ExtTIntArrayList list = result.get(shardDoc.shardTarget());
             if (list == null) {
@@ -270,7 +303,7 @@ public class SearchPhaseController extends AbstractComponent {
             sorted = true;
             TopFieldDocs fieldDocs = (TopFieldDocs) querySearchResult.queryResult().topDocs();
             for (int i = 0; i < fieldDocs.fields.length; i++) {
-                if (fieldDocs.fields[i].getType() == SortField.SCORE) {
+                if (fieldDocs.fields[i].getType() == SortField.Type.SCORE) {
                     sortScoreIndex = i;
                 }
             }
@@ -288,13 +321,15 @@ public class SearchPhaseController extends AbstractComponent {
                     namedFacets.clear();
                     for (QuerySearchResultProvider queryResultProvider : queryResults.values()) {
                         for (Facet facet1 : queryResultProvider.queryResult().facets()) {
-                            if (facet.name().equals(facet1.name())) {
+                            if (facet.getName().equals(facet1.getName())) {
                                 namedFacets.add(facet1);
                             }
                         }
                     }
-                    Facet aggregatedFacet = facetProcessors.processor(facet.type()).reduce(facet.name(), namedFacets);
-                    aggregatedFacets.add(aggregatedFacet);
+                    if (!namedFacets.isEmpty()) {
+                        Facet aggregatedFacet = ((InternalFacet) namedFacets.get(0)).reduce(namedFacets);
+                        aggregatedFacets.add(aggregatedFacet);
+                    }
                 }
                 facets = new InternalFacets(aggregatedFacets);
             }
@@ -350,7 +385,27 @@ public class SearchPhaseController extends AbstractComponent {
             }
         }
 
+        // merge suggest results
+        Suggest suggest = null;
+        if (!queryResults.isEmpty()) {
+            
+            final Map<String, List<Suggest.Suggestion>> groupedSuggestions = new HashMap<String, List<Suggest.Suggestion>>();
+            boolean hasSuggestions = false;
+            for (QuerySearchResultProvider resultProvider : queryResults.values()) {
+                Suggest shardResult = resultProvider.queryResult().suggest();
+                
+                if (shardResult == null) {
+                    continue;
+                }
+                hasSuggestions = true;
+                Suggest.group(groupedSuggestions, shardResult);
+            }
+
+            suggest = hasSuggestions ? new Suggest(Suggest.Fields.SUGGEST, Suggest.reduce(groupedSuggestions)) : null;
+        }
+
         InternalSearchHits searchHits = new InternalSearchHits(hits.toArray(new InternalSearchHit[hits.size()]), totalHits, maxScore);
-        return new InternalSearchResponse(searchHits, facets, timedOut);
+        return new InternalSearchResponse(searchHits, facets, suggest, timedOut);
     }
+    
 }

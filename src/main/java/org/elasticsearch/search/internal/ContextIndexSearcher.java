@@ -19,94 +19,85 @@
 
 package org.elasticsearch.search.internal;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import org.apache.lucene.index.ExtendedIndexSearcher;
-import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.AtomicReaderContext;
 import org.apache.lucene.search.*;
 import org.elasticsearch.common.lucene.MinimumScoreCollector;
 import org.elasticsearch.common.lucene.MultiCollector;
-import org.elasticsearch.common.lucene.search.AndFilter;
 import org.elasticsearch.common.lucene.search.FilteredCollector;
+import org.elasticsearch.common.lucene.search.XCollector;
+import org.elasticsearch.common.lucene.search.XFilteredQuery;
 import org.elasticsearch.index.engine.Engine;
 import org.elasticsearch.search.dfs.CachedDfSource;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  *
  */
-public class ContextIndexSearcher extends ExtendedIndexSearcher {
+public class ContextIndexSearcher extends IndexSearcher {
 
-    public static final class Scopes {
-        public static final String MAIN = "_main_";
-        public static final String GLOBAL = "_global_";
-        public static final String NA = "_na_";
+    public static enum Stage {
+        NA,
+        MAIN_QUERY,
+        REWRITE
     }
 
     private final SearchContext searchContext;
 
-    private final IndexReader reader;
-
     private CachedDfSource dfSource;
 
-    private Map<String, List<Collector>> scopeCollectors;
+    private List<Collector> queryCollectors;
 
-    private String processingScope;
+    private Stage currentState = Stage.NA;
+
+    private boolean enableMainDocIdSetCollector;
+    private DocIdSetCollector mainDocIdSetCollector;
 
     public ContextIndexSearcher(SearchContext searchContext, Engine.Searcher searcher) {
-        super(searcher.searcher());
+        super(searcher.reader());
         this.searchContext = searchContext;
-        this.reader = searcher.searcher().getIndexReader();
+        setSimilarity(searcher.searcher().getSimilarity());
+    }
+
+    public void release() {
+        if (mainDocIdSetCollector != null) {
+            mainDocIdSetCollector.release();
+        }
     }
 
     public void dfSource(CachedDfSource dfSource) {
         this.dfSource = dfSource;
     }
 
-    public void addCollector(String scope, Collector collector) {
-        if (scopeCollectors == null) {
-            scopeCollectors = Maps.newHashMap();
+    /**
+     * Adds a query level collector that runs at {@link Stage#MAIN_QUERY}. Note, supports
+     * {@link org.elasticsearch.common.lucene.search.XCollector} allowing for a callback
+     * when collection is done.
+     */
+    public void addMainQueryCollector(Collector collector) {
+        if (queryCollectors == null) {
+            queryCollectors = new ArrayList<Collector>();
         }
-        List<Collector> collectors = scopeCollectors.get(scope);
-        if (collectors == null) {
-            collectors = Lists.newArrayList();
-            scopeCollectors.put(scope, collectors);
-        }
-        collectors.add(collector);
+        queryCollectors.add(collector);
     }
 
-    public List<Collector> removeCollectors(String scope) {
-        if (scopeCollectors == null) {
-            return null;
-        }
-        return scopeCollectors.remove(scope);
+    public DocIdSetCollector mainDocIdSetCollector() {
+        return this.mainDocIdSetCollector;
     }
 
-    public boolean hasCollectors(String scope) {
-        if (scopeCollectors == null) {
-            return false;
-        }
-        if (!scopeCollectors.containsKey(scope)) {
-            return false;
-        }
-        return !scopeCollectors.get(scope).isEmpty();
+    public void enableMainDocIdSetCollector() {
+        this.enableMainDocIdSetCollector = true;
     }
 
-    public void processingScope(String scope) {
-        this.processingScope = scope;
+    public void inStage(Stage stage) {
+        this.currentState = stage;
     }
 
-    public void processedScope() {
-        // clean the current scope (we processed it, also handles scrolling since we don't want to
-        // do it again)
-        if (scopeCollectors != null) {
-            scopeCollectors.remove(processingScope);
-        }
-        this.processingScope = Scopes.NA;
+    public void finishStage(Stage stage) {
+        assert currentState == stage : "Expected stage " + stage + " but was stage " + currentState;
+        this.currentState = Stage.NA;
     }
 
     @Override
@@ -133,39 +124,25 @@ public class ContextIndexSearcher extends ExtendedIndexSearcher {
         return super.createNormalizedWeight(query);
     }
 
-    // override from the Searcher to allow to control if scores will be tracked or not
-    // LUCENE MONITOR - We override the logic here to apply our own flags for track scores
     @Override
-    public TopFieldDocs search(Weight weight, Filter filter, int nDocs,
-                               Sort sort, boolean fillFields) throws IOException {
-        int limit = reader.maxDoc();
-        if (limit == 0) {
-            limit = 1;
-        }
-        nDocs = Math.min(nDocs, limit);
-
-        TopFieldCollector collector = TopFieldCollector.create(sort, nDocs,
-                fillFields, searchContext.trackScores(), searchContext.trackScores(), !weight.scoresDocsOutOfOrder());
-        search(weight, filter, collector);
-        return (TopFieldDocs) collector.topDocs();
-    }
-
-    @Override
-    public void search(Weight weight, Filter filter, Collector collector) throws IOException {
-        if (searchContext.parsedFilter() != null && Scopes.MAIN.equals(processingScope)) {
-            // this will only get applied to the actual search collector and not
-            // to any scoped collectors, also, it will only be applied to the main collector
-            // since that is where the filter should only work
-            collector = new FilteredCollector(collector, searchContext.parsedFilter());
-        }
+    public void search(List<AtomicReaderContext> leaves, Weight weight, Collector collector) throws IOException {
         if (searchContext.timeoutInMillis() != -1) {
             // TODO: change to use our own counter that uses the scheduler in ThreadPool
             collector = new TimeLimitingCollector(collector, TimeLimitingCollector.getGlobalCounter(), searchContext.timeoutInMillis());
         }
-        if (scopeCollectors != null) {
-            List<Collector> collectors = scopeCollectors.get(processingScope);
-            if (collectors != null && !collectors.isEmpty()) {
-                collector = new MultiCollector(collector, collectors.toArray(new Collector[collectors.size()]));
+        if (currentState == Stage.MAIN_QUERY) {
+            if (enableMainDocIdSetCollector) {
+                // TODO should we create a cache of segment->docIdSets so we won't create one each time?
+                collector = this.mainDocIdSetCollector = new DocIdSetCollector(searchContext.docSetCache(), collector);
+            }
+            if (searchContext.parsedFilter() != null) {
+                // this will only get applied to the actual search collector and not
+                // to any scoped collectors, also, it will only be applied to the main collector
+                // since that is where the filter should only work
+                collector = new FilteredCollector(collector, searchContext.parsedFilter());
+            }
+            if (queryCollectors != null && !queryCollectors.isEmpty()) {
+                collector = new MultiCollector(collector, queryCollectors.toArray(new Collector[queryCollectors.size()]));
             }
         }
         // apply the minimum score after multi collector so we filter facets as well
@@ -173,26 +150,38 @@ public class ContextIndexSearcher extends ExtendedIndexSearcher {
             collector = new MinimumScoreCollector(collector, searchContext.minimumScore());
         }
 
-        Filter combinedFilter;
-        if (filter == null) {
-            combinedFilter = searchContext.aliasFilter();
-        } else {
-            if (searchContext.aliasFilter() != null) {
-                combinedFilter = new AndFilter(ImmutableList.of(filter, searchContext.aliasFilter()));
-            } else {
-                combinedFilter = filter;
-            }
-        }
-
         // we only compute the doc id set once since within a context, we execute the same query always...
         if (searchContext.timeoutInMillis() != -1) {
             try {
-                super.search(weight, combinedFilter, collector);
+                super.search(leaves, weight, collector);
             } catch (TimeLimitingCollector.TimeExceededException e) {
                 searchContext.queryResult().searchTimedOut(true);
             }
         } else {
-            super.search(weight, combinedFilter, collector);
+            super.search(leaves, weight, collector);
         }
+        if (currentState == Stage.MAIN_QUERY) {
+            if (enableMainDocIdSetCollector) {
+                enableMainDocIdSetCollector = false;
+                mainDocIdSetCollector.postCollection();
+            }
+            if (queryCollectors != null && !queryCollectors.isEmpty()) {
+                for (Collector queryCollector : queryCollectors) {
+                    if (queryCollector instanceof XCollector) {
+                        ((XCollector) queryCollector).postCollection();
+                    }
+                }
+            }
+        }
+    }
+
+    @Override
+    public Explanation explain(Query query, int doc) throws IOException {
+        if (searchContext.aliasFilter() == null) {
+            return super.explain(query, doc);
+        }
+
+        XFilteredQuery filteredQuery = new XFilteredQuery(query, searchContext.aliasFilter());
+        return super.explain(filteredQuery, doc);
     }
 }

@@ -19,13 +19,17 @@
 
 package org.elasticsearch.indices;
 
+import org.elasticsearch.action.admin.indices.stats.CommonStats;
+import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Streamable;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentBuilderString;
-import org.elasticsearch.index.cache.CacheStats;
+import org.elasticsearch.index.cache.filter.FilterCacheStats;
+import org.elasticsearch.index.cache.id.IdCacheStats;
+import org.elasticsearch.index.fielddata.FieldDataStats;
 import org.elasticsearch.index.flush.FlushStats;
 import org.elasticsearch.index.get.GetStats;
 import org.elasticsearch.index.indexing.IndexingStats;
@@ -40,117 +44,71 @@ import java.io.Serializable;
 
 /**
  * Global information on indices stats running on a specific node.
- *
- *
  */
 public class NodeIndicesStats implements Streamable, Serializable, ToXContent {
 
-    private StoreStats storeStats;
-
-    private DocsStats docsStats;
-
-    private IndexingStats indexingStats;
-
-    private GetStats getStats;
-
-    private SearchStats searchStats;
-
-    private CacheStats cacheStats;
-
-    private MergeStats mergeStats;
-
-    private RefreshStats refreshStats;
-
-    private FlushStats flushStats;
+    private CommonStats stats;
 
     NodeIndicesStats() {
     }
 
-    public NodeIndicesStats(StoreStats storeStats, DocsStats docsStats, IndexingStats indexingStats, GetStats getStats, SearchStats searchStats, CacheStats cacheStats, MergeStats mergeStats, RefreshStats refreshStats, FlushStats flushStats) {
-        this.storeStats = storeStats;
-        this.docsStats = docsStats;
-        this.indexingStats = indexingStats;
-        this.getStats = getStats;
-        this.searchStats = searchStats;
-        this.cacheStats = cacheStats;
-        this.mergeStats = mergeStats;
-        this.refreshStats = refreshStats;
-        this.flushStats = flushStats;
+    public NodeIndicesStats(CommonStats stats) {
+        this.stats = stats;
     }
 
-    public StoreStats store() {
-        return this.storeStats;
-    }
-
-    /**
-     * The size of the index storage taken on the node.
-     */
+    @Nullable
     public StoreStats getStore() {
-        return storeStats;
+        return stats.getStore();
     }
 
-    public DocsStats docs() {
-        return this.docsStats;
-    }
-
+    @Nullable
     public DocsStats getDocs() {
-        return this.docsStats;
+        return stats.getDocs();
     }
 
-    public IndexingStats indexing() {
-        return indexingStats;
-    }
-
+    @Nullable
     public IndexingStats getIndexing() {
-        return indexing();
+        return stats.getIndexing();
     }
 
-    public GetStats get() {
-        return this.getStats;
-    }
-
+    @Nullable
     public GetStats getGet() {
-        return this.getStats;
+        return stats.getGet();
     }
 
-    public SearchStats search() {
-        return this.searchStats;
-    }
-
+    @Nullable
     public SearchStats getSearch() {
-        return this.searchStats;
+        return stats.getSearch();
     }
 
-    public CacheStats cache() {
-        return this.cacheStats;
-    }
-
-    public CacheStats getCache() {
-        return this.cache();
-    }
-
-    public MergeStats merge() {
-        return this.mergeStats;
-    }
-
+    @Nullable
     public MergeStats getMerge() {
-        return this.mergeStats;
+        return stats.getMerge();
     }
 
-    public RefreshStats refresh() {
-        return this.refreshStats;
-    }
-
+    @Nullable
     public RefreshStats getRefresh() {
-        return this.refresh();
+        return stats.getRefresh();
     }
 
-    public FlushStats flush() {
-        return this.flushStats;
-    }
-
+    @Nullable
     public FlushStats getFlush() {
-        return this.flushStats;
+        return stats.getFlush();
+    }
+
+    @Nullable
+    public FieldDataStats getFieldData() {
+        return stats.getFieldData();
+    }
+
+    @Nullable
+    public FilterCacheStats getFilterCache() {
+        return stats.getFilterCache();
+    }
+
+    @Nullable
+    public IdCacheStats getIdCache() {
+        return stats.getIdCache();
     }
 
     public static NodeIndicesStats readIndicesStats(StreamInput in) throws IOException {
@@ -161,44 +119,18 @@ public class NodeIndicesStats implements Streamable, Serializable, ToXContent {
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
-        storeStats = StoreStats.readStoreStats(in);
-        docsStats = DocsStats.readDocStats(in);
-        indexingStats = IndexingStats.readIndexingStats(in);
-        getStats = GetStats.readGetStats(in);
-        searchStats = SearchStats.readSearchStats(in);
-        cacheStats = CacheStats.readCacheStats(in);
-        mergeStats = MergeStats.readMergeStats(in);
-        refreshStats = RefreshStats.readRefreshStats(in);
-        flushStats = FlushStats.readFlushStats(in);
+        stats = CommonStats.readCommonStats(in);
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        storeStats.writeTo(out);
-        docsStats.writeTo(out);
-        indexingStats.writeTo(out);
-        getStats.writeTo(out);
-        searchStats.writeTo(out);
-        cacheStats.writeTo(out);
-        mergeStats.writeTo(out);
-        refreshStats.writeTo(out);
-        flushStats.writeTo(out);
+        stats.writeTo(out);
     }
 
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
         builder.startObject(Fields.INDICES);
-
-        storeStats.toXContent(builder, params);
-        docsStats.toXContent(builder, params);
-        indexingStats.toXContent(builder, params);
-        getStats.toXContent(builder, params);
-        searchStats.toXContent(builder, params);
-        cacheStats.toXContent(builder, params);
-        mergeStats.toXContent(builder, params);
-        refreshStats.toXContent(builder, params);
-        flushStats.toXContent(builder, params);
-
+        stats.toXContent(builder, params);
         builder.endObject();
         return builder;
     }

@@ -66,19 +66,24 @@ public class ParseContext {
 
     private DocumentMapper.ParseListener listener;
 
-    private String uid;
+    private Field uid, version;
 
     private StringBuilder stringBuilder = new StringBuilder();
 
     private Map<String, String> ignoredValues = new HashMap<String, String>();
 
-    private boolean mappersAdded = false;
+    private boolean mappingsModified = false;
 
     private boolean externalValueSet;
 
     private Object externalValue;
 
     private AllEntries allEntries = new AllEntries();
+
+    private float docBoost = 1.0f;
+
+    private FieldMapperListener.Aggregator newFieldMappers = new FieldMapperListener.Aggregator();
+    private ObjectMapperListener.Aggregator newObjectMappers = new ObjectMapperListener.Aggregator();
 
     public ParseContext(String index, @Nullable Settings indexSettings, DocumentMapperParser docMapperParser, DocumentMapper docMapper, ContentPath path) {
         this.index = index;
@@ -99,30 +104,42 @@ public class ParseContext {
         }
         this.analyzer = null;
         this.uid = null;
+        this.version = null;
         this.id = null;
         this.sourceToParse = source;
         this.source = source == null ? null : sourceToParse.source();
         this.path.reset();
-        this.mappersAdded = false;
+        this.mappingsModified = false;
         this.listener = listener == null ? DocumentMapper.ParseListener.EMPTY : listener;
         this.allEntries = new AllEntries();
         this.ignoredValues.clear();
+        this.docBoost = 1.0f;
+        this.newFieldMappers.mappers.clear();
+        this.newObjectMappers.mappers.clear();
     }
 
     public boolean flyweight() {
         return sourceToParse.flyweight();
     }
 
+    public FieldMapperListener.Aggregator newFieldMappers() {
+        return newFieldMappers;
+    }
+
+    public ObjectMapperListener.Aggregator newObjectMappers() {
+        return newObjectMappers;
+    }
+
     public DocumentMapperParser docMapperParser() {
         return this.docMapperParser;
     }
 
-    public boolean mappersAdded() {
-        return this.mappersAdded;
+    public boolean mappingsModified() {
+        return this.mappingsModified;
     }
 
-    public void addedMapper() {
-        this.mappersAdded = true;
+    public void setMappingsModified() {
+        this.mappingsModified = true;
     }
 
     public String index() {
@@ -216,19 +233,27 @@ public class ParseContext {
         this.id = id;
     }
 
-    public String uid() {
+    public Field uid() {
         return this.uid;
     }
 
     /**
      * Really, just the uid mapper should set this.
      */
-    public void uid(String uid) {
+    public void uid(Field uid) {
         this.uid = uid;
     }
 
+    public Field version() {
+        return this.version;
+    }
+
+    public void version(Field version) {
+        this.version = version;
+    }
+
     public boolean includeInAll(Boolean includeInAll, FieldMapper mapper) {
-        return includeInAll(includeInAll, mapper.index());
+        return includeInAll(includeInAll, mapper.fieldType().indexed());
     }
 
     /**
@@ -236,13 +261,13 @@ public class ParseContext {
      * is <tt>false</tt>. If its enabled, then will return <tt>true</tt> only if the specific flag is <tt>null</tt> or
      * its actual value (so, if not set, defaults to "true") and the field is indexed.
      */
-    private boolean includeInAll(Boolean specificIncludeInAll, Field.Index index) {
+    private boolean includeInAll(Boolean specificIncludeInAll, boolean indexed) {
         if (!docMapper.allFieldMapper().enabled()) {
             return false;
         }
         // not explicitly set
         if (specificIncludeInAll == null) {
-            return index != Field.Index.NO;
+            return indexed;
         }
         return specificIncludeInAll;
     }
@@ -271,6 +296,14 @@ public class ParseContext {
     public Object externalValue() {
         externalValueSet = false;
         return externalValue;
+    }
+
+    public float docBoost() {
+        return this.docBoost;
+    }
+
+    public void docBoost(float docBoost) {
+        this.docBoost = docBoost;
     }
 
     /**

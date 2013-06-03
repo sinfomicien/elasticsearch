@@ -29,9 +29,15 @@ import org.elasticsearch.cluster.block.ClusterBlocks;
 import org.elasticsearch.cluster.metadata.MetaData;
 import org.elasticsearch.cluster.routing.allocation.AllocationService;
 import org.elasticsearch.cluster.routing.allocation.RoutingAllocation;
+import org.elasticsearch.cluster.settings.ClusterDynamicSettings;
+import org.elasticsearch.cluster.settings.DynamicSettings;
+import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.xcontent.XContentBuilder;
+import org.elasticsearch.common.xcontent.XContentFactory;
+import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
 
@@ -48,11 +54,14 @@ public class TransportClusterUpdateSettingsAction extends TransportMasterNodeOpe
 
     private final AllocationService allocationService;
 
+    private final DynamicSettings dynamicSettings;
+
     @Inject
     public TransportClusterUpdateSettingsAction(Settings settings, TransportService transportService, ClusterService clusterService, ThreadPool threadPool,
-                                                AllocationService allocationService) {
+                                                AllocationService allocationService, @ClusterDynamicSettings DynamicSettings dynamicSettings) {
         super(settings, transportService, clusterService, threadPool);
         this.allocationService = allocationService;
+        this.dynamicSettings = dynamicSettings;
     }
 
     @Override
@@ -80,7 +89,10 @@ public class TransportClusterUpdateSettingsAction extends TransportMasterNodeOpe
         final AtomicReference<Throwable> failureRef = new AtomicReference<Throwable>();
         final CountDownLatch latch = new CountDownLatch(1);
 
-        clusterService.submitStateUpdateTask("cluster_update_settings", new ProcessedClusterStateUpdateTask() {
+        final ImmutableSettings.Builder transientUpdates = ImmutableSettings.settingsBuilder();
+        final ImmutableSettings.Builder persistentUpdates = ImmutableSettings.settingsBuilder();
+
+        clusterService.submitStateUpdateTask("cluster_update_settings", Priority.URGENT, new ProcessedClusterStateUpdateTask() {
             @Override
             public ClusterState execute(ClusterState currentState) {
                 try {
@@ -88,9 +100,15 @@ public class TransportClusterUpdateSettingsAction extends TransportMasterNodeOpe
                     ImmutableSettings.Builder transientSettings = ImmutableSettings.settingsBuilder();
                     transientSettings.put(currentState.metaData().transientSettings());
                     for (Map.Entry<String, String> entry : request.transientSettings().getAsMap().entrySet()) {
-                        if (MetaData.hasDynamicSetting(entry.getKey()) || entry.getKey().startsWith("logger.")) {
-                            transientSettings.put(entry.getKey(), entry.getValue());
-                            changed = true;
+                        if (dynamicSettings.hasDynamicSetting(entry.getKey()) || entry.getKey().startsWith("logger.")) {
+                            String error = dynamicSettings.validateDynamicSetting(entry.getKey(), entry.getValue());
+                            if (error == null) {
+                                transientSettings.put(entry.getKey(), entry.getValue());
+                                transientUpdates.put(entry.getKey(), entry.getValue());
+                                changed = true;
+                            } else {
+                                logger.warn("ignoring transient setting [{}], [{}]", entry.getKey(), error);
+                            }
                         } else {
                             logger.warn("ignoring transient setting [{}], not dynamically updateable", entry.getKey());
                         }
@@ -99,9 +117,15 @@ public class TransportClusterUpdateSettingsAction extends TransportMasterNodeOpe
                     ImmutableSettings.Builder persistentSettings = ImmutableSettings.settingsBuilder();
                     persistentSettings.put(currentState.metaData().persistentSettings());
                     for (Map.Entry<String, String> entry : request.persistentSettings().getAsMap().entrySet()) {
-                        if (MetaData.hasDynamicSetting(entry.getKey()) || entry.getKey().startsWith("logger.")) {
-                            changed = true;
-                            persistentSettings.put(entry.getKey(), entry.getValue());
+                        if (dynamicSettings.hasDynamicSetting(entry.getKey()) || entry.getKey().startsWith("logger.")) {
+                            String error = dynamicSettings.validateDynamicSetting(entry.getKey(), entry.getValue());
+                            if (error == null) {
+                                persistentSettings.put(entry.getKey(), entry.getValue());
+                                persistentUpdates.put(entry.getKey(), entry.getValue());
+                                changed = true;
+                            } else {
+                                logger.warn("ignoring persistent setting [{}], [{}]", entry.getKey(), error);
+                            }
                         } else {
                             logger.warn("ignoring persistent setting [{}], not dynamically updateable", entry.getKey());
                         }
@@ -137,7 +161,7 @@ public class TransportClusterUpdateSettingsAction extends TransportMasterNodeOpe
             @Override
             public void clusterStateProcessed(ClusterState clusterState) {
                 // now, reroute
-                clusterService.submitStateUpdateTask("reroute_after_cluster_update_settings", new ClusterStateUpdateTask() {
+                clusterService.submitStateUpdateTask("reroute_after_cluster_update_settings", Priority.URGENT, new ClusterStateUpdateTask() {
                     @Override
                     public ClusterState execute(ClusterState currentState) {
                         try {
@@ -166,6 +190,6 @@ public class TransportClusterUpdateSettingsAction extends TransportMasterNodeOpe
             }
         }
 
-        return new ClusterUpdateSettingsResponse();
+        return new ClusterUpdateSettingsResponse(transientUpdates.build(), persistentUpdates.build());
     }
 }

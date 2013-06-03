@@ -1,10 +1,32 @@
+/*
+ * Licensed to ElasticSearch and Shay Banon under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership. ElasticSearch licenses this
+ * file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
 package org.elasticsearch.common.geo;
 
 import com.spatial4j.core.shape.Shape;
+import com.spatial4j.core.shape.impl.RectangleImpl;
 import com.spatial4j.core.shape.jts.JtsGeometry;
 import com.spatial4j.core.shape.jts.JtsPoint;
-import com.spatial4j.core.shape.simple.RectangleImpl;
-import com.vividsolutions.jts.geom.*;
+import com.vividsolutions.jts.geom.Coordinate;
+import com.vividsolutions.jts.geom.GeometryFactory;
+import com.vividsolutions.jts.geom.LinearRing;
+import com.vividsolutions.jts.geom.Polygon;
 import org.elasticsearch.ElasticSearchParseException;
 import org.elasticsearch.common.xcontent.XContentParser;
 
@@ -16,17 +38,17 @@ import java.util.Locale;
 /**
  * Parsers which supports reading {@link Shape}s in GeoJSON format from a given
  * {@link XContentParser}.
- *
+ * <p/>
  * An example of the format used for polygons:
- *
+ * <p/>
  * {
- *   "type": "Polygon",
- *   "coordinates": [
- *      [ [100.0, 0.0], [101.0, 0.0], [101.0, 1.0],
- *      [100.0, 1.0], [100.0, 0.0] ]
- *   ]
+ * "type": "Polygon",
+ * "coordinates": [
+ * [ [100.0, 0.0], [101.0, 0.0], [101.0, 1.0],
+ * [100.0, 1.0], [100.0, 0.0] ]
+ * ]
  * }
- *
+ * <p/>
  * Note, currently MultiPolygon and GeometryCollections are not supported
  */
 public class GeoJSONShapeParser {
@@ -58,14 +80,17 @@ public class GeoJSONShapeParser {
                 String fieldName = parser.currentName();
 
                 if ("type".equals(fieldName)) {
-                    token = parser.nextToken();
+                    parser.nextToken();
                     shapeType = parser.text().toLowerCase(Locale.ENGLISH);
                     if (shapeType == null) {
                         throw new ElasticSearchParseException("Unknown Shape type [" + parser.text() + "]");
                     }
                 } else if ("coordinates".equals(fieldName)) {
-                    token = parser.nextToken();
+                    parser.nextToken();
                     node = parseCoordinates(parser);
+                } else {
+                    parser.nextToken();
+                    parser.skipChildren();
                 }
             }
         }
@@ -112,32 +137,51 @@ public class GeoJSONShapeParser {
      * of coordinates
      *
      * @param shapeType Type of Shape to be built
-     * @param node Root node of the coordinate tree
+     * @param node      Root node of the coordinate tree
      * @return Shape built from the coordinates
      */
     private static Shape buildShape(String shapeType, CoordinateNode node) {
         if ("point".equals(shapeType)) {
-            return new JtsPoint(GEOMETRY_FACTORY.createPoint(node.coordinate));
+            return new JtsPoint(GEOMETRY_FACTORY.createPoint(node.coordinate), GeoShapeConstants.SPATIAL_CONTEXT);
         } else if ("linestring".equals(shapeType)) {
-            return new JtsGeometry(GEOMETRY_FACTORY.createLineString(toCoordinates(node)));
+            return new JtsGeometry(GEOMETRY_FACTORY.createLineString(toCoordinates(node)), GeoShapeConstants.SPATIAL_CONTEXT, true);
         } else if ("polygon".equals(shapeType)) {
-            LinearRing shell = GEOMETRY_FACTORY.createLinearRing(toCoordinates(node.children.get(0)));
-            LinearRing[] holes = null;
-            if (node.children.size() > 1) {
-                holes = new LinearRing[node.children.size() - 1];
-                for (int i = 0; i < node.children.size() - 1; i++) {
-                    holes[i] = GEOMETRY_FACTORY.createLinearRing(toCoordinates(node.children.get(i + 1)));
-                }
-            }
-            return new JtsGeometry(GEOMETRY_FACTORY.createPolygon(shell, holes));
+            return new JtsGeometry(buildPolygon(node), GeoShapeConstants.SPATIAL_CONTEXT, true);
         } else if ("multipoint".equals(shapeType)) {
-            return new JtsGeometry(GEOMETRY_FACTORY.createMultiPoint(toCoordinates(node)));
+            return new JtsGeometry(GEOMETRY_FACTORY.createMultiPoint(toCoordinates(node)), GeoShapeConstants.SPATIAL_CONTEXT, true);
         } else if ("envelope".equals(shapeType)) {
             Coordinate[] coordinates = toCoordinates(node);
-            return new RectangleImpl(coordinates[0].x, coordinates[1].x, coordinates[1].y, coordinates[0].y);
+            return new RectangleImpl(coordinates[0].x, coordinates[1].x, coordinates[1].y, coordinates[0].y, GeoShapeConstants.SPATIAL_CONTEXT);
+        } else if ("multipolygon".equals(shapeType)) {
+            Polygon[] polygons = new Polygon[node.children.size()];
+            for (int i = 0; i < node.children.size(); i++) {
+                polygons[i] = buildPolygon(node.children.get(i));
+            }
+            return new JtsGeometry(
+                    GEOMETRY_FACTORY.createMultiPolygon(polygons),
+                    GeoShapeConstants.SPATIAL_CONTEXT,
+                    true);
         }
 
         throw new UnsupportedOperationException("ShapeType [" + shapeType + "] not supported");
+    }
+
+    /**
+     * Builds a {@link Polygon} from the given CoordinateNode
+     *
+     * @param node CoordinateNode that the Polygon will be built from
+     * @return Polygon consisting of the coordinates in the CoordinateNode
+     */
+    private static Polygon buildPolygon(CoordinateNode node) {
+        LinearRing shell = GEOMETRY_FACTORY.createLinearRing(toCoordinates(node.children.get(0)));
+        LinearRing[] holes = null;
+        if (node.children.size() > 1) {
+            holes = new LinearRing[node.children.size() - 1];
+            for (int i = 0; i < node.children.size() - 1; i++) {
+                holes[i] = GEOMETRY_FACTORY.createLinearRing(toCoordinates(node.children.get(i + 1)));
+            }
+        }
+        return GEOMETRY_FACTORY.createPolygon(shell, holes);
     }
 
     /**
@@ -157,7 +201,7 @@ public class GeoJSONShapeParser {
 
     /**
      * Node used to represent a tree of coordinates.
-     *
+     * <p/>
      * Can either be a leaf node consisting of a Coordinate, or a parent with children
      */
     private static class CoordinateNode {

@@ -19,6 +19,8 @@
 
 package org.elasticsearch.search.facet.query;
 
+import org.elasticsearch.common.bytes.BytesReference;
+import org.elasticsearch.common.bytes.HashedBytesArray;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.xcontent.XContentBuilder;
@@ -27,13 +29,14 @@ import org.elasticsearch.search.facet.Facet;
 import org.elasticsearch.search.facet.InternalFacet;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  *
  */
-public class InternalQueryFacet implements QueryFacet, InternalFacet {
+public class InternalQueryFacet extends InternalFacet implements QueryFacet {
 
-    private static final String STREAM_TYPE = "query";
+    private static final BytesReference STREAM_TYPE = new HashedBytesArray("query");
 
     public static void registerStreams() {
         Streams.registerStream(STREAM, STREAM_TYPE);
@@ -41,17 +44,15 @@ public class InternalQueryFacet implements QueryFacet, InternalFacet {
 
     static Stream STREAM = new Stream() {
         @Override
-        public Facet readFacet(String type, StreamInput in) throws IOException {
+        public Facet readFacet(StreamInput in) throws IOException {
             return readQueryFacet(in);
         }
     };
 
     @Override
-    public String streamType() {
+    public BytesReference streamType() {
         return STREAM_TYPE;
     }
-
-    private String name;
 
     private long count;
 
@@ -60,13 +61,8 @@ public class InternalQueryFacet implements QueryFacet, InternalFacet {
     }
 
     public InternalQueryFacet(String name, long count) {
-        this.name = name;
+        super(name);
         this.count = count;
-    }
-
-    @Override
-    public String type() {
-        return TYPE;
     }
 
     @Override
@@ -74,30 +70,20 @@ public class InternalQueryFacet implements QueryFacet, InternalFacet {
         return TYPE;
     }
 
-    /**
-     * The "logical" name of the facet.
-     */
-    public String name() {
-        return name;
+    public long getCount() {
+        return count;
     }
 
     @Override
-    public String getName() {
-        return name();
-    }
-
-    /**
-     * The count of the facet.
-     */
-    public long count() {
-        return count;
-    }
-
-    /**
-     * The count of the facet.
-     */
-    public long getCount() {
-        return count;
+    public Facet reduce(List<Facet> facets) {
+        if (facets.size() == 1) {
+            return facets.get(0);
+        }
+        int count = 0;
+        for (Facet facet : facets) {
+            count += ((QueryFacet) facet).getCount();
+        }
+        return new InternalQueryFacet(getName(), count);
     }
 
     static final class Fields {
@@ -107,7 +93,7 @@ public class InternalQueryFacet implements QueryFacet, InternalFacet {
 
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
-        builder.startObject(name);
+        builder.startObject(getName());
         builder.field(Fields._TYPE, QueryFacet.TYPE);
         builder.field(Fields.COUNT, count);
         builder.endObject();
@@ -122,13 +108,13 @@ public class InternalQueryFacet implements QueryFacet, InternalFacet {
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
-        name = in.readUTF();
+        super.readFrom(in);
         count = in.readVLong();
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeUTF(name);
+        super.writeTo(out);
         out.writeVLong(count);
     }
 }

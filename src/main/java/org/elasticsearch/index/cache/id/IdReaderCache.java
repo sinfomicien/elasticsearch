@@ -26,11 +26,11 @@ import org.elasticsearch.common.bytes.HashedBytesArray;
  */
 public interface IdReaderCache {
 
-    Object readerCacheKey();
-
     IdReaderTypeCache type(String type);
 
     HashedBytesArray parentIdByDoc(String type, int docId);
 
     int docById(String type, HashedBytesArray id);
+
+    long sizeInBytes();
 }

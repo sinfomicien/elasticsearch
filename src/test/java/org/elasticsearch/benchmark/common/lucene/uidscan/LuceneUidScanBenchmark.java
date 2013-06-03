@@ -21,12 +21,14 @@ package org.elasticsearch.benchmark.common.lucene.uidscan;
 
 import jsr166y.ThreadLocalRandom;
 import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field.Store;
+import org.apache.lucene.document.NumericDocValuesField;
+import org.apache.lucene.document.StringField;
 import org.apache.lucene.index.*;
 import org.apache.lucene.store.FSDirectory;
-import org.elasticsearch.common.Numbers;
 import org.elasticsearch.common.StopWatch;
 import org.elasticsearch.common.lucene.Lucene;
-import org.elasticsearch.common.lucene.uid.UidField;
+import org.elasticsearch.common.lucene.uid.Versions;
 import org.elasticsearch.common.unit.SizeValue;
 
 import java.io.File;
@@ -52,12 +54,13 @@ public class LuceneUidScanBenchmark {
         System.out.println("Indexing " + INDEX_COUNT + " docs...");
         for (long i = startUid; i < LIMIT; i++) {
             Document doc = new Document();
-            doc.add(new UidField("_uid", Long.toString(i), i));
+            doc.add(new StringField("_uid", Long.toString(i), Store.NO));
+            doc.add(new NumericDocValuesField("_version", i));
             writer.addDocument(doc);
         }
         System.out.println("Done indexing, took " + watch.stop().lastTaskTime());
 
-        final IndexReader reader = IndexReader.open(writer, true);
+        final IndexReader reader = DirectoryReader.open(writer, true);
 
         final CountDownLatch latch = new CountDownLatch(NUMBER_OF_THREADS);
         Thread[] threads = new Thread[NUMBER_OF_THREADS];
@@ -68,21 +71,11 @@ public class LuceneUidScanBenchmark {
                     try {
                         for (long i = 0; i < SCAN_COUNT; i++) {
                             long id = startUid + (Math.abs(ThreadLocalRandom.current().nextInt()) % INDEX_COUNT);
-                            TermPositions uid = reader.termPositions(new Term("_uid", Long.toString(id)));
-                            uid.next();
-                            uid.nextPosition();
-                            if (!uid.isPayloadAvailable()) {
-                                uid.close();
-                                System.err.println("no payload...");
-                                break;
-                            }
-                            byte[] payload = uid.getPayload(new byte[8], 0);
-                            if (Numbers.bytesToLong(payload) != id) {
-                                uid.close();
+                            final long version = Versions.loadVersion(reader, new Term("_uid", Long.toString(id)));
+                            if (version != id) {
                                 System.err.println("wrong id...");
                                 break;
                             }
-                            uid.close();
                         }
                     } catch (Exception e) {
                         e.printStackTrace();

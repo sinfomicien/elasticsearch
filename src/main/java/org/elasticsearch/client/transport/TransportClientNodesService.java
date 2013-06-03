@@ -22,7 +22,6 @@ package org.elasticsearch.client.transport;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
-import jsr166y.LinkedTransferQueue;
 import org.elasticsearch.ElasticSearchException;
 import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.action.ActionListener;
@@ -38,13 +37,11 @@ import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.TransportAddress;
 import org.elasticsearch.common.unit.TimeValue;
+import org.elasticsearch.common.util.concurrent.ConcurrentCollections;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.*;
 
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -250,7 +247,7 @@ public class TransportClientNodesService extends AbstractComponent {
                 } else {
                     try {
                         callback.doWithNode(nodes.get((index + i) % nodes.size()), this);
-                    } catch (Exception e1) {
+                    } catch (Throwable e1) {
                         // retry the next one...
                         onFailure(e);
                     }
@@ -318,7 +315,7 @@ public class TransportClientNodesService extends AbstractComponent {
                                     return new NodesInfoResponse();
                                 }
                             }).txGet();
-                    if (!ignoreClusterName && !clusterName.equals(nodeInfo.clusterName())) {
+                    if (!ignoreClusterName && !clusterName.equals(nodeInfo.getClusterName())) {
                         logger.warn("node {} not part of the cluster {}, ignoring...", node, clusterName);
                     } else {
                         newNodes.add(node);
@@ -351,7 +348,7 @@ public class TransportClientNodesService extends AbstractComponent {
             }
 
             final CountDownLatch latch = new CountDownLatch(nodesToPing.size());
-            final LinkedTransferQueue<ClusterStateResponse> clusterStateResponses = new LinkedTransferQueue<ClusterStateResponse>();
+            final Queue<ClusterStateResponse> clusterStateResponses = ConcurrentCollections.newQueue();
             for (final DiscoveryNode listedNode : nodesToPing) {
                 threadPool.executor(ThreadPool.Names.MANAGEMENT).execute(new Runnable() {
                     @Override
@@ -421,10 +418,10 @@ public class TransportClientNodesService extends AbstractComponent {
 
             HashSet<DiscoveryNode> newNodes = new HashSet<DiscoveryNode>();
             for (ClusterStateResponse clusterStateResponse : clusterStateResponses) {
-                if (!ignoreClusterName && !clusterName.equals(clusterStateResponse.clusterName())) {
-                    logger.warn("node {} not part of the cluster {}, ignoring...", clusterStateResponse.state().nodes().localNode(), clusterName);
+                if (!ignoreClusterName && !clusterName.equals(clusterStateResponse.getClusterName())) {
+                    logger.warn("node {} not part of the cluster {}, ignoring...", clusterStateResponse.getState().nodes().localNode(), clusterName);
                 }
-                for (DiscoveryNode node : clusterStateResponse.state().nodes().dataNodes().values()) {
+                for (DiscoveryNode node : clusterStateResponse.getState().nodes().dataNodes().values()) {
                     newNodes.add(node);
                 }
             }

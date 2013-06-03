@@ -19,10 +19,15 @@
 
 package org.elasticsearch.common.util.concurrent;
 
+import jsr166e.ConcurrentHashMapV8;
+import jsr166y.LinkedTransferQueue;
 import org.elasticsearch.common.collect.MapBackedSet;
 
+import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
 
 /**
@@ -30,29 +35,57 @@ import java.util.concurrent.ConcurrentMap;
  */
 public abstract class ConcurrentCollections {
 
-    private final static boolean useNonBlockingMap = Boolean.parseBoolean(System.getProperty("elasticsearch.useNonBlockingMap", "false"));
+    private final static boolean useConcurrentHashMapV8 = Boolean.parseBoolean(System.getProperty("es.useConcurrentHashMapV8", "false"));
+    private final static boolean useLinkedTransferQueue = Boolean.parseBoolean(System.getProperty("es.useLinkedTransferQueue", "false"));
+
+    static final int aggressiveConcurrencyLevel;
+
+    static {
+        aggressiveConcurrencyLevel = Math.max(Runtime.getRuntime().availableProcessors() * 2, 16);
+    }
+
+    /**
+     * Creates a new CHM with an aggressive concurrency level, aimed at high concurrent update rate long living maps.
+     */
+    public static <K, V> ConcurrentMap<K, V> newConcurrentMapWithAggressiveConcurrency() {
+        if (useConcurrentHashMapV8) {
+            return new ConcurrentHashMapV8<K, V>(16, 0.75f, aggressiveConcurrencyLevel);
+        }
+        return new ConcurrentHashMap<K, V>(16, 0.75f, aggressiveConcurrencyLevel);
+    }
 
     public static <K, V> ConcurrentMap<K, V> newConcurrentMap() {
-//        if (useNonBlockingMap) {
-//            return new NonBlockingHashMap<K, V>();
-//        }
+        if (useConcurrentHashMapV8) {
+            return new ConcurrentHashMapV8<K, V>();
+        }
         return new ConcurrentHashMap<K, V>();
     }
 
+    /**
+     * Creates a new CHM with an aggressive concurrency level, aimed at highly updateable long living maps.
+     */
+    public static <V> ConcurrentMapLong<V> newConcurrentMapLongWithAggressiveConcurrency() {
+        return new ConcurrentHashMapLong<V>(ConcurrentCollections.<Long, V>newConcurrentMapWithAggressiveConcurrency());
+    }
+
     public static <V> ConcurrentMapLong<V> newConcurrentMapLong() {
-//        if (useNonBlockingMap) {
-//            return new NonBlockingHashMapLong<V>();
-//        }
-        return new ConcurrentHashMapLong<V>();
+        return new ConcurrentHashMapLong<V>(ConcurrentCollections.<Long, V>newConcurrentMap());
     }
 
     public static <V> Set<V> newConcurrentSet() {
-//        if (useNonBlockingMap) {
-//            return new NonBlockingHashSet<V>();
-//        }
-        return new MapBackedSet<V>(new ConcurrentHashMap<V, Boolean>());
+        return new MapBackedSet<V>(ConcurrentCollections.<V, Boolean>newConcurrentMap());
     }
 
+    public static <T> Queue<T> newQueue() {
+        if (useLinkedTransferQueue) {
+            return new LinkedTransferQueue<T>();
+        }
+        return new ConcurrentLinkedQueue<T>();
+    }
+
+    public static <T> BlockingQueue<T> newBlockingQueue() {
+        return new LinkedTransferQueue<T>();
+    }
 
     private ConcurrentCollections() {
 

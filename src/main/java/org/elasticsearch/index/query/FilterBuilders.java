@@ -21,6 +21,7 @@ package org.elasticsearch.index.query;
 
 import com.spatial4j.core.shape.Shape;
 import org.elasticsearch.common.Nullable;
+import org.elasticsearch.common.geo.ShapeRelation;
 
 /**
  * A static factory for simple "import static" usage.
@@ -196,6 +197,14 @@ public abstract class FilterBuilders {
     }
 
     /**
+     * A terms lookup filter for the provided field name. A lookup terms filter can
+     * extract the terms to filter by from another doc in an index.
+     */
+    public static TermsLookupFilterBuilder termsLookupFilter(String name) {
+        return new TermsLookupFilterBuilder(name);
+    }
+
+    /**
      * A filer for a field based on several terms matching on any of them.
      *
      * @param name   The field name
@@ -264,6 +273,16 @@ public abstract class FilterBuilders {
      */
     public static PrefixFilterBuilder prefixFilter(String name, String prefix) {
         return new PrefixFilterBuilder(name, prefix);
+    }
+
+    /**
+     * A filter that restricts search results to field values that match a given regular expression.
+     *
+     * @param name   The field name
+     * @param regexp The regular expression
+     */
+    public static RegexpFilterBuilder regexpFilter(String name, String regexp) {
+        return new RegexpFilterBuilder(name, regexp);
     }
 
     /**
@@ -340,13 +359,60 @@ public abstract class FilterBuilders {
     }
 
     /**
-     * A filter to filter based on the relationship between a shape and indexed shapes
+     * A filter based on the relationship of a shape and indexed shapes
      *
-     * @param name The shape field name
+     * @param name  The shape field name
+     * @param shape Shape to use in the filter
+     * @param relation relation of the shapes
+     */
+    public static GeoShapeFilterBuilder geoShapeFilter(String name, Shape shape, ShapeRelation relation) {
+        return new GeoShapeFilterBuilder(name, shape, relation);
+    }
+
+    public static GeoShapeFilterBuilder geoShapeFilter(String name, String indexedShapeId, String indexedShapeType, ShapeRelation relation) {
+        return new GeoShapeFilterBuilder(name, indexedShapeId, indexedShapeType, relation);
+    }
+
+    /**
+     * A filter to filter indexed shapes intersecting with shapes
+     *
+     * @param name  The shape field name
      * @param shape Shape to use in the filter
      */
-    public static GeoShapeFilterBuilder geoShapeFilter(String name, Shape shape) {
-        return new GeoShapeFilterBuilder(name, shape);
+    public static GeoShapeFilterBuilder geoIntersectionFilter(String name, Shape shape) {
+        return geoShapeFilter(name, shape, ShapeRelation.INTERSECTS);
+    }
+
+    public static GeoShapeFilterBuilder geoIntersectionFilter(String name, String indexedShapeId, String indexedShapeType) {
+        return geoShapeFilter(name, indexedShapeId, indexedShapeType, ShapeRelation.INTERSECTS);
+    }
+
+    /**
+     * A filter to filter indexed shapes that are contained by a shape
+     *
+     * @param name  The shape field name
+     * @param shape Shape to use in the filter
+     */
+    public static GeoShapeFilterBuilder geoWithinFilter(String name, Shape shape) {
+        return geoShapeFilter(name, shape, ShapeRelation.WITHIN);
+    }
+
+    public static GeoShapeFilterBuilder geoWithinFilter(String name, String indexedShapeId, String indexedShapeType) {
+        return geoShapeFilter(name, indexedShapeId, indexedShapeType, ShapeRelation.WITHIN);
+    }
+
+    /**
+     * A filter to filter indexed shapes that are not intersection with the query shape
+     *
+     * @param name  The shape field name
+     * @param shape Shape to use in the filter
+     */
+    public static GeoShapeFilterBuilder geoDisjointFilter(String name, Shape shape) {
+        return geoShapeFilter(name, shape, ShapeRelation.DISJOINT);
+    }
+
+    public static GeoShapeFilterBuilder geoDisjointFilter(String name, String indexedShapeId, String indexedShapeType) {
+        return geoShapeFilter(name, indexedShapeId, indexedShapeType, ShapeRelation.DISJOINT);
     }
 
     /**
@@ -376,6 +442,39 @@ public abstract class FilterBuilders {
      */
     public static HasChildFilterBuilder hasChildFilter(String type, QueryBuilder query) {
         return new HasChildFilterBuilder(type, query);
+    }
+
+    /**
+     * Constructs a child filter, with the child type and the filter to run against child documents, with
+     * the result of the filter being the *parent* documents.
+     *
+     * @param type   The child type
+     * @param filter The query to run against the child type
+     */
+    public static HasChildFilterBuilder hasChildFilter(String type, FilterBuilder filter) {
+        return new HasChildFilterBuilder(type, filter);
+    }
+
+    /**
+     * Constructs a parent filter, with the parent type and the query to run against parent documents, with
+     * the result of the filter being the *child* documents.
+     *
+     * @param parentType The parent type
+     * @param query      The query to run against the parent type
+     */
+    public static HasParentFilterBuilder hasParentFilter(String parentType, QueryBuilder query) {
+        return new HasParentFilterBuilder(parentType, query);
+    }
+
+    /**
+     * Constructs a parent filter, with the parent type and the filter to run against parent documents, with
+     * the result of the filter being the *child* documents.
+     *
+     * @param parentType The parent type
+     * @param filter     The filter to run against the parent type
+     */
+    public static HasParentFilterBuilder hasParentFilter(String parentType, FilterBuilder filter) {
+        return new HasParentFilterBuilder(parentType, filter);
     }
 
     public static BoolFilterBuilder boolFilter() {

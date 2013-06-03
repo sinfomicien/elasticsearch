@@ -19,22 +19,23 @@
 
 package org.elasticsearch.plugins;
 
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
+import com.google.common.collect.*;
 import org.elasticsearch.ElasticSearchException;
+import org.elasticsearch.action.admin.cluster.node.info.PluginInfo;
+import org.elasticsearch.action.admin.cluster.node.info.PluginsInfo;
+import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.collect.MapBuilder;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.component.LifecycleComponent;
-import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.inject.Module;
 import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.env.Environment;
 import org.elasticsearch.index.CloseableIndexComponent;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Method;
@@ -47,12 +48,17 @@ import static com.google.common.collect.Maps.newHashMap;
  *
  */
 public class PluginsService extends AbstractComponent {
+    private static final String ES_PLUGIN_PROPERTIES = "es-plugin.properties";
 
     private final Environment environment;
 
     private final ImmutableMap<String, Plugin> plugins;
 
     private final ImmutableMap<Plugin, List<OnModuleReference>> onModuleReferences;
+
+    private PluginsInfo cachedPluginsInfo;
+    private final TimeValue refreshInterval;
+    private long lastRefresh;
 
     static class OnModuleReference {
         public final Class<? extends Module> moduleClass;
@@ -64,17 +70,28 @@ public class PluginsService extends AbstractComponent {
         }
     }
 
-    @Inject
+    /**
+     * Constructs a new PluginService
+     * @param settings The settings of the system
+     * @param environment The environment of the system
+     */
     public PluginsService(Settings settings, Environment environment) {
         super(settings);
         this.environment = environment;
 
-        loadPluginsIntoClassLoader();
-
-        // first, find all the ones that are in the classpath
         Map<String, Plugin> plugins = Maps.newHashMap();
+
+        //first we load all the default plugins from the settings
+        String[] defaultPluginsClasses = settings.getAsArray("plugin.types");
+        for (String pluginClass : defaultPluginsClasses) {
+            Plugin plugin = loadPlugin(pluginClass, settings);
+            plugins.put(plugin.name(), plugin);
+        }
+
+        // now, find all the ones that are in the classpath
+        loadPluginsIntoClassLoader();
         plugins.putAll(loadPluginsFromClasspath(settings));
-        Set<String> sitePlugins = sitePlugins();
+        Set<String> sitePlugins = PluginsHelper.sitePlugins(this.environment);
 
         String[] mandatoryPlugins = settings.getAsArray("plugin.mandatory", null);
         if (mandatoryPlugins != null) {
@@ -85,7 +102,7 @@ public class PluginsService extends AbstractComponent {
                 }
             }
             if (!missingPlugins.isEmpty()) {
-                throw new ElasticSearchException("Missing mandatory plugins " + missingPlugins);
+                throw new ElasticSearchException("Missing mandatory plugins [" + Strings.collectionToDelimitedString(missingPlugins, ", ") + "]");
             }
         }
 
@@ -117,6 +134,9 @@ public class PluginsService extends AbstractComponent {
             }
         }
         this.onModuleReferences = onModuleReferences.immutableMap();
+
+        this.refreshInterval = componentSettings.getAsTime("info_refresh_interval", TimeValue.timeValueSeconds(10));
+
     }
 
     public ImmutableMap<String, Plugin> plugins() {
@@ -229,22 +249,91 @@ public class PluginsService extends AbstractComponent {
         return services;
     }
 
-    private Set<String> sitePlugins() {
+    /**
+     * Get information about plugins (jvm and site plugins).
+     * Information are cached for 10 seconds by default. Modify `plugins.info_refresh_interval` property if needed.
+     * Setting `plugins.info_refresh_interval` to `-1` will cause infinite caching.
+     * Setting `plugins.info_refresh_interval` to `0` will disable caching.
+     * @return List of plugins information
+     */
+    synchronized public PluginsInfo info() {
+        if (refreshInterval.millis() != 0) {
+            if (cachedPluginsInfo != null &&
+                    (refreshInterval.millis() < 0 || (System.currentTimeMillis() - lastRefresh) < refreshInterval.millis())) {
+                if (logger.isTraceEnabled()) logger.trace("using cache to retrieve plugins info");
+                return cachedPluginsInfo;
+            }
+            lastRefresh = System.currentTimeMillis();
+        }
+
+        if (logger.isTraceEnabled()) logger.trace("starting to fetch info on plugins");
+        cachedPluginsInfo = new PluginsInfo();
+
+        // We create a map to have only unique values
+        Set<String> plugins = new HashSet<String>();
+
+        for (Plugin plugin : plugins().values()) {
+            // We should detect if the plugin has also an embedded _site structure
+            File siteFile = new File(new File(environment.pluginsFile(), plugin.name()), "_site");
+            boolean isSite = siteFile.exists() && siteFile.isDirectory();
+            if (logger.isTraceEnabled()) logger.trace("found a jvm plugin [{}], [{}]{}",
+                    plugin.name(), plugin.description(), isSite ? ": with _site structure" : "");
+            cachedPluginsInfo.add(new PluginInfo(plugin.name(), plugin.description(), isSite, true));
+            plugins.add(plugin.name());
+        }
+
         File pluginsFile = environment.pluginsFile();
-        Set<String> sitePlugins = Sets.newHashSet();
         if (!pluginsFile.exists()) {
-            return sitePlugins;
+            return cachedPluginsInfo;
         }
         if (!pluginsFile.isDirectory()) {
-            return sitePlugins;
+            return cachedPluginsInfo;
         }
+
         File[] pluginsFiles = pluginsFile.listFiles();
-        for (File pluginFile : pluginsFiles) {
-            if (new File(pluginFile, "_site").exists()) {
-                sitePlugins.add(pluginFile.getName());
+        if (pluginsFiles != null) {
+            for (File plugin : pluginsFiles) {
+                // We skip already known jvm plugins
+                if (!plugins.contains(plugin.getName())) {
+                    File sitePluginDir = new File(plugin, "_site");
+                    if (sitePluginDir.exists()) {
+                        String name = plugin.getName();
+                        String description = "No description found for " + name + ".";
+
+                        // We check if es-plugin.properties exists in plugin/_site dir
+                        File pluginPropFile = new File(sitePluginDir, ES_PLUGIN_PROPERTIES);
+                        if (pluginPropFile.exists()) {
+
+                            Properties pluginProps = new Properties();
+                            InputStream is = null;
+                            try {
+                                is = new FileInputStream(pluginPropFile.getAbsolutePath());
+                                pluginProps.load(is);
+                                description = pluginProps.getProperty("description");
+                            } catch (Exception e) {
+                                logger.warn("failed to load plugin description from [" +
+                                        pluginPropFile.getAbsolutePath() + "]", e);
+                            } finally {
+                                if (is != null) {
+                                    try {
+                                        is.close();
+                                    } catch (IOException e) {
+                                        // ignore
+                                    }
+                                }
+                            }
+                        }
+
+                        if (logger.isTraceEnabled()) logger.trace("found a site plugin [{}], [{}]",
+                                name, description);
+                        cachedPluginsInfo.add(new PluginInfo(name, description, true, false));
+                    }
+                }
             }
         }
-        return sitePlugins;
+
+
+        return cachedPluginsInfo;
     }
 
     private void loadPluginsIntoClassLoader() {
@@ -309,7 +398,7 @@ public class PluginsService extends AbstractComponent {
         Map<String, Plugin> plugins = newHashMap();
         Enumeration<URL> pluginUrls = null;
         try {
-            pluginUrls = settings.getClassLoader().getResources("es-plugin.properties");
+            pluginUrls = settings.getClassLoader().getResources(ES_PLUGIN_PROPERTIES);
         } catch (IOException e) {
             logger.warn("failed to find plugins from classpath", e);
             return ImmutableMap.of();
@@ -321,18 +410,8 @@ public class PluginsService extends AbstractComponent {
             try {
                 is = pluginUrl.openStream();
                 pluginProps.load(is);
-                String sPluginClass = pluginProps.getProperty("plugin");
-                Class<? extends Plugin> pluginClass = (Class<? extends Plugin>) settings.getClassLoader().loadClass(sPluginClass);
-                Plugin plugin;
-                try {
-                    plugin = pluginClass.getConstructor(Settings.class).newInstance(settings);
-                } catch (NoSuchMethodException e) {
-                    try {
-                        plugin = pluginClass.getConstructor().newInstance();
-                    } catch (NoSuchMethodException e1) {
-                        throw new ElasticSearchException("No constructor for [" + pluginClass + "]");
-                    }
-                }
+                String pluginClassName = pluginProps.getProperty("plugin");
+                Plugin plugin = loadPlugin(pluginClassName, settings);
                 plugins.put(plugin.name(), plugin);
             } catch (Exception e) {
                 logger.warn("failed to load plugin from [" + pluginUrl + "]", e);
@@ -347,5 +426,26 @@ public class PluginsService extends AbstractComponent {
             }
         }
         return plugins;
+    }
+
+    private Plugin loadPlugin(String className, Settings settings) {
+        try {
+            Class<? extends Plugin> pluginClass = (Class<? extends Plugin>) settings.getClassLoader().loadClass(className);
+            try {
+                return pluginClass.getConstructor(Settings.class).newInstance(settings);
+            } catch (NoSuchMethodException e) {
+                try {
+                    return pluginClass.getConstructor().newInstance();
+                } catch (NoSuchMethodException e1) {
+                    throw new ElasticSearchException("No constructor for [" + pluginClass + "]. A plugin class must " +
+                            "have either an empty default constructor or a single argument constructor accepting a " +
+                            "Settings instance");
+                }
+            }
+
+        } catch (Exception e) {
+            throw new ElasticSearchException("Failed to load plugin class [" + className + "]", e);
+        }
+
     }
 }
