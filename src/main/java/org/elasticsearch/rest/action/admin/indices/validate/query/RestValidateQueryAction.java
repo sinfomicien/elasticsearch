@@ -23,6 +23,7 @@ import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.admin.indices.validate.query.QueryExplanation;
 import org.elasticsearch.action.admin.indices.validate.query.ValidateQueryRequest;
 import org.elasticsearch.action.admin.indices.validate.query.ValidateQueryResponse;
+import org.elasticsearch.action.support.IgnoreIndices;
 import org.elasticsearch.action.support.broadcast.BroadcastOperationThreading;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.common.bytes.BytesReference;
@@ -62,6 +63,9 @@ public class RestValidateQueryAction extends BaseRestHandler {
     public void handleRequest(final RestRequest request, final RestChannel channel) {
         ValidateQueryRequest validateQueryRequest = new ValidateQueryRequest(RestActions.splitIndices(request.param("index")));
         validateQueryRequest.listenerThreaded(false);
+        if (request.hasParam("ignore_indices")) {
+            validateQueryRequest.ignoreIndices(IgnoreIndices.fromString(request.param("ignore_indices")));
+        }
         try {
             BroadcastOperationThreading operationThreading = BroadcastOperationThreading.fromString(request.param("operation_threading"), BroadcastOperationThreading.SINGLE_THREAD);
             if (operationThreading == BroadcastOperationThreading.NO_THREADS) {
@@ -104,23 +108,23 @@ public class RestValidateQueryAction extends BaseRestHandler {
                 try {
                     XContentBuilder builder = RestXContentBuilder.restContentBuilder(request);
                     builder.startObject();
-                    builder.field("valid", response.valid());
+                    builder.field("valid", response.isValid());
 
                     buildBroadcastShardsHeader(builder, response);
 
-                    if (response.queryExplanations() != null && !response.queryExplanations().isEmpty()) {
+                    if (response.getQueryExplanation() != null && !response.getQueryExplanation().isEmpty()) {
                         builder.startArray("explanations");
-                        for (QueryExplanation explanation : response.queryExplanations()) {
+                        for (QueryExplanation explanation : response.getQueryExplanation()) {
                             builder.startObject();
-                            if (explanation.index() != null) {
-                                builder.field("index", explanation.index(), XContentBuilder.FieldCaseConversion.NONE);
+                            if (explanation.getIndex() != null) {
+                                builder.field("index", explanation.getIndex(), XContentBuilder.FieldCaseConversion.NONE);
                             }
-                            builder.field("valid", explanation.valid());
-                            if (explanation.error() != null) {
-                                builder.field("error", explanation.error());
+                            builder.field("valid", explanation.isValid());
+                            if (explanation.getError() != null) {
+                                builder.field("error", explanation.getError());
                             }
-                            if (explanation.explanation() != null) {
-                                builder.field("explanation", explanation.explanation());
+                            if (explanation.getExplanation() != null) {
+                                builder.field("explanation", explanation.getExplanation());
                             }
                             builder.endObject();
                         }
@@ -128,7 +132,7 @@ public class RestValidateQueryAction extends BaseRestHandler {
                     }
                     builder.endObject();
                     channel.sendResponse(new XContentRestResponse(request, OK, builder));
-                } catch (Exception e) {
+                } catch (Throwable e) {
                     onFailure(e);
                 }
             }

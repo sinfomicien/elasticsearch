@@ -36,6 +36,10 @@ import org.elasticsearch.action.deletebyquery.DeleteByQueryAction;
 import org.elasticsearch.action.deletebyquery.DeleteByQueryRequest;
 import org.elasticsearch.action.deletebyquery.DeleteByQueryRequestBuilder;
 import org.elasticsearch.action.deletebyquery.DeleteByQueryResponse;
+import org.elasticsearch.action.explain.ExplainAction;
+import org.elasticsearch.action.explain.ExplainRequest;
+import org.elasticsearch.action.explain.ExplainRequestBuilder;
+import org.elasticsearch.action.explain.ExplainResponse;
 import org.elasticsearch.action.get.*;
 import org.elasticsearch.action.index.IndexAction;
 import org.elasticsearch.action.index.IndexRequest;
@@ -49,6 +53,10 @@ import org.elasticsearch.action.percolate.PercolateRequest;
 import org.elasticsearch.action.percolate.PercolateRequestBuilder;
 import org.elasticsearch.action.percolate.PercolateResponse;
 import org.elasticsearch.action.search.*;
+import org.elasticsearch.action.suggest.SuggestAction;
+import org.elasticsearch.action.suggest.SuggestRequest;
+import org.elasticsearch.action.suggest.SuggestRequestBuilder;
+import org.elasticsearch.action.suggest.SuggestResponse;
 import org.elasticsearch.action.update.UpdateAction;
 import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.action.update.UpdateRequestBuilder;
@@ -62,7 +70,7 @@ import org.elasticsearch.common.Nullable;
 public abstract class AbstractClient implements InternalClient {
 
     @Override
-    public <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response>> RequestBuilder prepareExecute(final Action<Request, Response, RequestBuilder> action) {
+    public <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response, RequestBuilder>> RequestBuilder prepareExecute(final Action<Request, Response, RequestBuilder> action) {
         return action.newRequestBuilder(this);
     }
 
@@ -257,6 +265,21 @@ public abstract class AbstractClient implements InternalClient {
     }
 
     @Override
+    public ActionFuture<SuggestResponse> suggest(final SuggestRequest request) {
+        return execute(SuggestAction.INSTANCE, request);
+    }
+
+    @Override
+    public void suggest(final SuggestRequest request, final ActionListener<SuggestResponse> listener) {
+        execute(SuggestAction.INSTANCE, request, listener);
+    }
+
+    @Override
+    public SuggestRequestBuilder prepareSuggest(String... indices) {
+        return new SuggestRequestBuilder(this).setIndices(indices);
+    }
+
+    @Override
     public ActionFuture<SearchResponse> moreLikeThis(final MoreLikeThisRequest request) {
         return execute(MoreLikeThisAction.INSTANCE, request);
     }
@@ -284,5 +307,20 @@ public abstract class AbstractClient implements InternalClient {
     @Override
     public PercolateRequestBuilder preparePercolate(String index, String type) {
         return new PercolateRequestBuilder(this, index, type);
+    }
+
+    @Override
+    public ExplainRequestBuilder prepareExplain(String index, String type, String id) {
+        return new ExplainRequestBuilder(this, index, type, id);
+    }
+
+    @Override
+    public ActionFuture<ExplainResponse> explain(ExplainRequest request) {
+        return execute(ExplainAction.INSTANCE, request);
+    }
+
+    @Override
+    public void explain(ExplainRequest request, ActionListener<ExplainResponse> listener) {
+        execute(ExplainAction.INSTANCE, request, listener);
     }
 }

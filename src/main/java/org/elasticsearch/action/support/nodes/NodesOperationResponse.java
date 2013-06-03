@@ -32,12 +32,10 @@ import java.util.Map;
 /**
  *
  */
-public abstract class NodesOperationResponse<NodeResponse extends NodeOperationResponse> implements ActionResponse, Iterable<NodeResponse> {
+public abstract class NodesOperationResponse<NodeResponse extends NodeOperationResponse> extends ActionResponse implements Iterable<NodeResponse> {
 
     private ClusterName clusterName;
-
     protected NodeResponse[] nodes;
-
     private Map<String, NodeResponse> nodesMap;
 
     protected NodesOperationResponse() {
@@ -48,20 +46,16 @@ public abstract class NodesOperationResponse<NodeResponse extends NodeOperationR
         this.nodes = nodes;
     }
 
-    public ClusterName clusterName() {
+    public ClusterName getClusterName() {
         return this.clusterName;
     }
 
-    public String getClusterName() {
-        return clusterName().value();
-    }
-
-    public NodeResponse[] nodes() {
-        return nodes;
+    public String getClusterNameAsString() {
+        return this.clusterName.value();
     }
 
     public NodeResponse[] getNodes() {
-        return nodes();
+        return nodes;
     }
 
     public NodeResponse getAt(int position) {
@@ -70,30 +64,28 @@ public abstract class NodesOperationResponse<NodeResponse extends NodeOperationR
 
     @Override
     public Iterator<NodeResponse> iterator() {
-        return nodesMap().values().iterator();
+        return getNodesMap().values().iterator();
     }
 
-    public Map<String, NodeResponse> nodesMap() {
+    public Map<String, NodeResponse> getNodesMap() {
         if (nodesMap == null) {
             nodesMap = Maps.newHashMap();
             for (NodeResponse nodeResponse : nodes) {
-                nodesMap.put(nodeResponse.node().id(), nodeResponse);
+                nodesMap.put(nodeResponse.getNode().id(), nodeResponse);
             }
         }
         return nodesMap;
     }
 
-    public Map<String, NodeResponse> getNodesMap() {
-        return nodesMap();
-    }
-
     @Override
     public void readFrom(StreamInput in) throws IOException {
+        super.readFrom(in);
         clusterName = ClusterName.readClusterName(in);
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
+        super.writeTo(out);
         clusterName.writeTo(out);
     }
 }

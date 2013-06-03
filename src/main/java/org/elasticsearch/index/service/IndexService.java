@@ -28,6 +28,7 @@ import org.elasticsearch.index.aliases.IndexAliasesService;
 import org.elasticsearch.index.analysis.AnalysisService;
 import org.elasticsearch.index.cache.IndexCache;
 import org.elasticsearch.index.engine.IndexEngine;
+import org.elasticsearch.index.fielddata.IndexFieldDataService;
 import org.elasticsearch.index.gateway.IndexGateway;
 import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.percolator.PercolatorService;
@@ -48,6 +49,8 @@ public interface IndexService extends IndexComponent, Iterable<IndexShard> {
 
     IndexCache cache();
 
+    IndexFieldDataService fieldData();
+
     IndexSettingsService settingsService();
 
     PercolatorService percolateService();
@@ -67,11 +70,6 @@ public interface IndexService extends IndexComponent, Iterable<IndexShard> {
     IndexStore store();
 
     IndexShard createShard(int sShardId) throws ElasticSearchException;
-
-    /**
-     * Cleans the shard locally, does not touch the gateway!.
-     */
-    void cleanShard(int shardId, String reason) throws ElasticSearchException;
 
     /**
      * Removes the shard, does not delete local data or the gateway.

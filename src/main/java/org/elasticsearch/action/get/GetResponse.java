@@ -24,7 +24,6 @@ import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.index.get.GetField;
@@ -40,7 +39,7 @@ import java.util.Map;
  * @see GetRequest
  * @see org.elasticsearch.client.Client#get(GetRequest)
  */
-public class GetResponse implements ActionResponse, Streamable, Iterable<GetField>, ToXContent {
+public class GetResponse extends ActionResponse implements Iterable<GetField>, ToXContent {
 
     private GetResult getResult;
 
@@ -54,99 +53,58 @@ public class GetResponse implements ActionResponse, Streamable, Iterable<GetFiel
     /**
      * Does the document exists.
      */
-    public boolean exists() {
-        return getResult.exists();
-    }
-
-    /**
-     * Does the document exists.
-     */
     public boolean isExists() {
-        return exists();
-    }
-
-    /**
-     * The index the document was fetched from.
-     */
-    public String index() {
-        return getResult.index();
+        return getResult.isExists();
     }
 
     /**
      * The index the document was fetched from.
      */
     public String getIndex() {
-        return index();
-    }
-
-    /**
-     * The type of the document.
-     */
-    public String type() {
-        return getResult.type();
+        return getResult.getIndex();
     }
 
     /**
      * The type of the document.
      */
     public String getType() {
-        return type();
-    }
-
-    /**
-     * The id of the document.
-     */
-    public String id() {
-        return getResult.id();
+        return getResult.getType();
     }
 
     /**
      * The id of the document.
      */
     public String getId() {
-        return id();
-    }
-
-    /**
-     * The version of the doc.
-     */
-    public long version() {
-        return getResult.version();
+        return getResult.getId();
     }
 
     /**
      * The version of the doc.
      */
     public long getVersion() {
-        return version();
-    }
-
-    /**
-     * The source of the document if exists.
-     */
-    public byte[] source() {
-        return getResult.source();
+        return getResult.getVersion();
     }
 
     /**
      * The source of the document if exists.
      */
     public byte[] getSourceAsBytes() {
-        return source();
+        return getResult.source();
     }
 
     /**
-     * Returns bytes reference, also un compress the source if needed.
+     * Returns the internal source bytes, as they are returned without munging (for example,
+     * might still be compressed).
      */
-    public BytesReference sourceRef() {
-        return getResult.sourceRef();
+    public BytesReference getSourceInternal() {
+        return getResult.internalSourceRef();
     }
 
     /**
      * Returns bytes reference, also un compress the source if needed.
      */
     public BytesReference getSourceAsBytesRef() {
-        return sourceRef();
+        return getResult.sourceRef();
     }
 
     /**
@@ -159,19 +117,15 @@ public class GetResponse implements ActionResponse, Streamable, Iterable<GetFiel
     /**
      * The source of the document (as a string).
      */
-    public String sourceAsString() {
-        return getResult.sourceAsString();
-    }
-
     public String getSourceAsString() {
-        return sourceAsString();
+        return getResult.sourceAsString();
     }
 
     /**
      * The source of the document (As a map).
      */
     @SuppressWarnings({"unchecked"})
-    public Map<String, Object> sourceAsMap() throws ElasticSearchParseException {
+    public Map<String, Object> getSourceAsMap() throws ElasticSearchParseException {
         return getResult.sourceAsMap();
     }
 
@@ -179,15 +133,11 @@ public class GetResponse implements ActionResponse, Streamable, Iterable<GetFiel
         return getResult.getSource();
     }
 
-    public Map<String, GetField> fields() {
-        return getResult.fields();
-    }
-
     public Map<String, GetField> getFields() {
-        return fields();
+        return getResult.getFields();
     }
 
-    public GetField field(String name) {
+    public GetField getField(String name) {
         return getResult.field(name);
     }
 
@@ -203,11 +153,13 @@ public class GetResponse implements ActionResponse, Streamable, Iterable<GetFiel
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
+        super.readFrom(in);
         getResult = GetResult.readGetResult(in);
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
+        super.writeTo(out);
         getResult.writeTo(out);
     }
 }

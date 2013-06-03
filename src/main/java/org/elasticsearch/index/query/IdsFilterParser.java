@@ -21,10 +21,14 @@ package org.elasticsearch.index.query;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
+import org.apache.lucene.queries.TermsFilter;
 import org.apache.lucene.search.Filter;
+import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.common.inject.Inject;
+import org.elasticsearch.common.lucene.search.Queries;
 import org.elasticsearch.common.xcontent.XContentParser;
-import org.elasticsearch.index.search.UidFilter;
+import org.elasticsearch.index.mapper.Uid;
+import org.elasticsearch.index.mapper.internal.UidFieldMapper;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -48,18 +52,20 @@ public class IdsFilterParser implements FilterParser {
     public Filter parse(QueryParseContext parseContext) throws IOException, QueryParsingException {
         XContentParser parser = parseContext.parser();
 
-        List<String> ids = new ArrayList<String>();
+        List<BytesRef> ids = new ArrayList<BytesRef>();
         Collection<String> types = null;
         String filterName = null;
         String currentFieldName = null;
         XContentParser.Token token;
+        boolean idsProvided = false;
         while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
             if (token == XContentParser.Token.FIELD_NAME) {
                 currentFieldName = parser.currentName();
             } else if (token == XContentParser.Token.START_ARRAY) {
                 if ("values".equals(currentFieldName)) {
+                    idsProvided = true;
                     while ((token = parser.nextToken()) != XContentParser.Token.END_ARRAY) {
-                        String value = parser.textOrNull();
+                        BytesRef value = parser.bytesOrNull();
                         if (value == null) {
                             throw new QueryParsingException(parseContext.index(), "No value specified for term filter");
                         }
@@ -88,8 +94,12 @@ public class IdsFilterParser implements FilterParser {
             }
         }
 
-        if (ids.size() == 0) {
-            throw new QueryParsingException(parseContext.index(), "[ids] filter, no ids values provided");
+        if (!idsProvided) {
+            throw new QueryParsingException(parseContext.index(), "[ids] filter requires providing a values element");
+        }
+
+        if (ids.isEmpty()) {
+            return Queries.MATCH_NO_FILTER;
         }
 
         if (types == null || types.isEmpty()) {
@@ -98,7 +108,7 @@ public class IdsFilterParser implements FilterParser {
             types = parseContext.mapperService().types();
         }
 
-        UidFilter filter = new UidFilter(types, ids, parseContext.indexCache().bloomCache());
+        TermsFilter filter = new TermsFilter(UidFieldMapper.NAME, Uid.createTypeUids(types, ids));
         if (filterName != null) {
             parseContext.addNamedFilter(filterName, filter);
         }

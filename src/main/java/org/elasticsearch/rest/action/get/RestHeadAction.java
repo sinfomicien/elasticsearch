@@ -42,6 +42,7 @@ public class RestHeadAction extends BaseRestHandler {
     public RestHeadAction(Settings settings, Client client, RestController controller) {
         super(settings, client);
         controller.registerHandler(HEAD, "/{index}/{type}/{id}", this);
+        controller.registerHandler(HEAD, "/{index}/{type}/{id}/_source", this);
     }
 
     @Override
@@ -62,12 +63,12 @@ public class RestHeadAction extends BaseRestHandler {
             @Override
             public void onResponse(GetResponse response) {
                 try {
-                    if (!response.exists()) {
+                    if (!response.isExists()) {
                         channel.sendResponse(new StringRestResponse(NOT_FOUND));
                     } else {
                         channel.sendResponse(new StringRestResponse(OK));
                     }
-                } catch (Exception e) {
+                } catch (Throwable e) {
                     onFailure(e);
                 }
             }

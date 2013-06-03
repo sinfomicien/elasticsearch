@@ -30,7 +30,9 @@ import java.io.IOException;
 /**
  *
  */
-public class ClusterStateRequest extends MasterNodeOperationRequest {
+public class ClusterStateRequest extends MasterNodeOperationRequest<ClusterStateRequest> {
+
+    public final static String NONE = "_na";
 
     private boolean filterRoutingTable = false;
 
@@ -104,6 +106,11 @@ public class ClusterStateRequest extends MasterNodeOperationRequest {
         return filteredIndices;
     }
 
+    public ClusterStateRequest filterOutIndices() {
+        this.filteredIndices = new String[]{NONE};
+        return this;
+    }
+
     public ClusterStateRequest filteredIndices(String... filteredIndices) {
         this.filteredIndices = filteredIndices;
         return this;
@@ -128,32 +135,14 @@ public class ClusterStateRequest extends MasterNodeOperationRequest {
     }
 
     @Override
-    public ClusterStateRequest listenerThreaded(boolean listenerThreaded) {
-        super.listenerThreaded(listenerThreaded);
-        return this;
-    }
-
-    @Override
     public void readFrom(StreamInput in) throws IOException {
         super.readFrom(in);
         filterRoutingTable = in.readBoolean();
         filterNodes = in.readBoolean();
         filterMetaData = in.readBoolean();
         filterBlocks = in.readBoolean();
-        int size = in.readVInt();
-        if (size > 0) {
-            filteredIndices = new String[size];
-            for (int i = 0; i < filteredIndices.length; i++) {
-                filteredIndices[i] = in.readUTF();
-            }
-        }
-        size = in.readVInt();
-        if (size > 0) {
-            filteredIndexTemplates = new String[size];
-            for (int i = 0; i < filteredIndexTemplates.length; i++) {
-                filteredIndexTemplates[i] = in.readUTF();
-            }
-        }
+        filteredIndices = in.readStringArray();
+        filteredIndexTemplates = in.readStringArray();
         local = in.readBoolean();
     }
 
@@ -164,14 +153,8 @@ public class ClusterStateRequest extends MasterNodeOperationRequest {
         out.writeBoolean(filterNodes);
         out.writeBoolean(filterMetaData);
         out.writeBoolean(filterBlocks);
-        out.writeVInt(filteredIndices.length);
-        for (String filteredIndex : filteredIndices) {
-            out.writeUTF(filteredIndex);
-        }
-        out.writeVInt(filteredIndexTemplates.length);
-        for (String filteredIndexTemplate : filteredIndexTemplates) {
-            out.writeUTF(filteredIndexTemplate);
-        }
+        out.writeStringArray(filteredIndices);
+        out.writeStringArray(filteredIndexTemplates);
         out.writeBoolean(local);
     }
 }

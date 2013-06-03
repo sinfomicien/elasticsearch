@@ -73,7 +73,7 @@ public class RestGetWarmerAction extends BaseRestHandler {
             @Override
             public void onResponse(ClusterStateResponse response) {
                 try {
-                    MetaData metaData = response.state().metaData();
+                    MetaData metaData = response.getState().metaData();
 
                     if (indices.length == 1 && metaData.indices().isEmpty()) {
                         channel.sendResponse(new XContentThrowableRestResponse(request, new IndexMissingException(new Index(indices[0]))));
@@ -121,7 +121,7 @@ public class RestGetWarmerAction extends BaseRestHandler {
                     }
 
                     channel.sendResponse(new XContentRestResponse(request, OK, builder));
-                } catch (Exception e) {
+                } catch (Throwable e) {
                     onFailure(e);
                 }
             }

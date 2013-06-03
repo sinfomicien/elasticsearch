@@ -20,7 +20,6 @@
 package org.elasticsearch.discovery.zen.ping.unicast;
 
 import com.google.common.collect.Lists;
-import jsr166y.LinkedTransferQueue;
 import org.elasticsearch.ElasticSearchException;
 import org.elasticsearch.ElasticSearchIllegalArgumentException;
 import org.elasticsearch.ElasticSearchIllegalStateException;
@@ -31,7 +30,6 @@ import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.component.AbstractLifecycleComponent;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.TransportAddress;
 import org.elasticsearch.common.unit.TimeValue;
@@ -78,7 +76,7 @@ public class UnicastZenPing extends AbstractLifecycleComponent<ZenPing> implemen
     private final Map<Integer, ConcurrentMap<DiscoveryNode, PingResponse>> receivedResponses = newConcurrentMap();
 
     // a list of temporal responses a node will return for a request (holds requests from other nodes)
-    private final Queue<PingResponse> temporalResponses = new LinkedTransferQueue<PingResponse>();
+    private final Queue<PingResponse> temporalResponses = ConcurrentCollections.newQueue();
 
     private final CopyOnWriteArrayList<UnicastHostsProvider> hostsProviders = new CopyOnWriteArrayList<UnicastHostsProvider>();
 
@@ -183,12 +181,12 @@ public class UnicastZenPing extends AbstractLifecycleComponent<ZenPing> implemen
                     public void run() {
                         sendPings(timeout, TimeValue.timeValueMillis(timeout.millis() / 2), sendPingsHandler);
                         ConcurrentMap<DiscoveryNode, PingResponse> responses = receivedResponses.remove(sendPingsHandler.id());
-                        listener.onPing(responses.values().toArray(new PingResponse[responses.size()]));
+                        sendPingsHandler.close();
                         for (DiscoveryNode node : sendPingsHandler.nodeToDisconnect) {
                             logger.trace("[{}] disconnecting from {}", sendPingsHandler.id(), node);
                             transportService.disconnectFromNode(node);
                         }
-                        sendPingsHandler.close();
+                        listener.onPing(responses.values().toArray(new PingResponse[responses.size()]));
                     }
                 });
             }
@@ -227,7 +225,6 @@ public class UnicastZenPing extends AbstractLifecycleComponent<ZenPing> implemen
                 executor.shutdownNow();
                 executor = null;
             }
-            nodeToDisconnect.clear();
         }
     }
 
@@ -267,6 +264,9 @@ public class UnicastZenPing extends AbstractLifecycleComponent<ZenPing> implemen
                     @Override
                     public void run() {
                         try {
+                            if (sendPingsHandler.isClosed()) {
+                                return;
+                            }
                             // connect to the node, see if we manage to do it, if not, bail
                             if (!nodeFoundByAddress) {
                                 logger.trace("[{}] connecting (light) to {}", sendPingsHandler.id(), nodeToSend);
@@ -402,7 +402,7 @@ public class UnicastZenPing extends AbstractLifecycleComponent<ZenPing> implemen
         }
     }
 
-    static class UnicastPingRequest implements Streamable {
+    static class UnicastPingRequest extends TransportRequest {
 
         int id;
 
@@ -415,6 +415,7 @@ public class UnicastZenPing extends AbstractLifecycleComponent<ZenPing> implemen
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
+            super.readFrom(in);
             id = in.readInt();
             timeout = readTimeValue(in);
             pingResponse = readPingResponse(in);
@@ -422,13 +423,14 @@ public class UnicastZenPing extends AbstractLifecycleComponent<ZenPing> implemen
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
+            super.writeTo(out);
             out.writeInt(id);
             timeout.writeTo(out);
             pingResponse.writeTo(out);
         }
     }
 
-    static class UnicastPingResponse implements Streamable {
+    static class UnicastPingResponse extends TransportResponse {
 
         int id;
 
@@ -439,6 +441,7 @@ public class UnicastZenPing extends AbstractLifecycleComponent<ZenPing> implemen
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
+            super.readFrom(in);
             id = in.readInt();
             pingResponses = new PingResponse[in.readVInt()];
             for (int i = 0; i < pingResponses.length; i++) {
@@ -448,6 +451,7 @@ public class UnicastZenPing extends AbstractLifecycleComponent<ZenPing> implemen
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
+            super.writeTo(out);
             out.writeInt(id);
             out.writeVInt(pingResponses.length);
             for (PingResponse pingResponse : pingResponses) {

@@ -25,8 +25,6 @@ import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
-import org.elasticsearch.common.io.stream.VoidStreamable;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.discovery.zen.DiscoveryNodesProvider;
@@ -71,15 +69,15 @@ public class MembershipAction extends AbstractComponent {
     }
 
     public void sendLeaveRequest(DiscoveryNode masterNode, DiscoveryNode node) {
-        transportService.sendRequest(node, LeaveRequestRequestHandler.ACTION, new LeaveRequest(masterNode), VoidTransportResponseHandler.INSTANCE_SAME);
+        transportService.sendRequest(node, LeaveRequestRequestHandler.ACTION, new LeaveRequest(masterNode), EmptyTransportResponseHandler.INSTANCE_SAME);
     }
 
     public void sendLeaveRequestBlocking(DiscoveryNode masterNode, DiscoveryNode node, TimeValue timeout) throws ElasticSearchException {
-        transportService.submitRequest(masterNode, LeaveRequestRequestHandler.ACTION, new LeaveRequest(node), VoidTransportResponseHandler.INSTANCE_SAME).txGet(timeout.millis(), TimeUnit.MILLISECONDS);
+        transportService.submitRequest(masterNode, LeaveRequestRequestHandler.ACTION, new LeaveRequest(node), EmptyTransportResponseHandler.INSTANCE_SAME).txGet(timeout.millis(), TimeUnit.MILLISECONDS);
     }
 
     public void sendJoinRequest(DiscoveryNode masterNode, DiscoveryNode node) {
-        transportService.sendRequest(masterNode, JoinRequestRequestHandler.ACTION, new JoinRequest(node, false), VoidTransportResponseHandler.INSTANCE_SAME);
+        transportService.sendRequest(masterNode, JoinRequestRequestHandler.ACTION, new JoinRequest(node, false), EmptyTransportResponseHandler.INSTANCE_SAME);
     }
 
     public ClusterState sendJoinRequestBlocking(DiscoveryNode masterNode, DiscoveryNode node, TimeValue timeout) throws ElasticSearchException {
@@ -95,11 +93,11 @@ public class MembershipAction extends AbstractComponent {
      * Validates the join request, throwing a failure if it failed.
      */
     public void sendValidateJoinRequestBlocking(DiscoveryNode node, ClusterState clusterState, TimeValue timeout) throws ElasticSearchException {
-        transportService.submitRequest(node, ValidateJoinRequestRequestHandler.ACTION, new ValidateJoinRequest(clusterState), VoidTransportResponseHandler.INSTANCE_SAME)
+        transportService.submitRequest(node, ValidateJoinRequestRequestHandler.ACTION, new ValidateJoinRequest(clusterState), EmptyTransportResponseHandler.INSTANCE_SAME)
                 .txGet(timeout.millis(), TimeUnit.MILLISECONDS);
     }
 
-    static class JoinRequest implements Streamable {
+    static class JoinRequest extends TransportRequest {
 
         DiscoveryNode node;
 
@@ -115,18 +113,20 @@ public class MembershipAction extends AbstractComponent {
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
+            super.readFrom(in);
             node = DiscoveryNode.readNode(in);
             withClusterState = in.readBoolean();
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
+            super.writeTo(out);
             node.writeTo(out);
             out.writeBoolean(withClusterState);
         }
     }
 
-    class JoinResponse implements Streamable {
+    class JoinResponse extends TransportResponse {
 
         ClusterState clusterState;
 
@@ -139,11 +139,13 @@ public class MembershipAction extends AbstractComponent {
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
+            super.readFrom(in);
             clusterState = ClusterState.Builder.readFrom(in, nodesProvider.nodes().localNode());
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
+            super.writeTo(out);
             ClusterState.Builder.writeTo(clusterState, out);
         }
     }
@@ -163,7 +165,7 @@ public class MembershipAction extends AbstractComponent {
             if (request.withClusterState) {
                 channel.sendResponse(new JoinResponse(clusterState));
             } else {
-                channel.sendResponse(VoidStreamable.INSTANCE);
+                channel.sendResponse(TransportResponse.Empty.INSTANCE);
             }
         }
 
@@ -173,7 +175,7 @@ public class MembershipAction extends AbstractComponent {
         }
     }
 
-    class ValidateJoinRequest implements Streamable {
+    class ValidateJoinRequest extends TransportRequest {
 
         ClusterState clusterState;
 
@@ -186,11 +188,13 @@ public class MembershipAction extends AbstractComponent {
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
+            super.readFrom(in);
             clusterState = ClusterState.Builder.readFrom(in, nodesProvider.nodes().localNode());
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
+            super.writeTo(out);
             ClusterState.Builder.writeTo(clusterState, out);
         }
     }
@@ -207,7 +211,7 @@ public class MembershipAction extends AbstractComponent {
         @Override
         public void messageReceived(ValidateJoinRequest request, TransportChannel channel) throws Exception {
             // for now, the mere fact that we can serialize the cluster state acts as validation....
-            channel.sendResponse(VoidStreamable.INSTANCE);
+            channel.sendResponse(TransportResponse.Empty.INSTANCE);
         }
 
         @Override
@@ -216,7 +220,7 @@ public class MembershipAction extends AbstractComponent {
         }
     }
 
-    private static class LeaveRequest implements Streamable {
+    static class LeaveRequest extends TransportRequest {
 
         private DiscoveryNode node;
 
@@ -229,11 +233,13 @@ public class MembershipAction extends AbstractComponent {
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
+            super.readFrom(in);
             node = DiscoveryNode.readNode(in);
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
+            super.writeTo(out);
             node.writeTo(out);
         }
     }
@@ -250,7 +256,7 @@ public class MembershipAction extends AbstractComponent {
         @Override
         public void messageReceived(LeaveRequest request, TransportChannel channel) throws Exception {
             listener.onLeave(request.node);
-            channel.sendResponse(VoidStreamable.INSTANCE);
+            channel.sendResponse(TransportResponse.Empty.INSTANCE);
         }
 
         @Override

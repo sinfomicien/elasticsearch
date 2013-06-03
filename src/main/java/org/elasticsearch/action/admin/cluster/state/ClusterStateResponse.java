@@ -30,10 +30,9 @@ import java.io.IOException;
 /**
  *
  */
-public class ClusterStateResponse implements ActionResponse {
+public class ClusterStateResponse extends ActionResponse {
 
     private ClusterName clusterName;
-
     private ClusterState clusterState;
 
     public ClusterStateResponse() {
@@ -44,30 +43,24 @@ public class ClusterStateResponse implements ActionResponse {
         this.clusterState = clusterState;
     }
 
-    public ClusterState state() {
+    public ClusterState getState() {
         return this.clusterState;
     }
 
-    public ClusterState getState() {
-        return state();
-    }
-
-    public ClusterName clusterName() {
-        return this.clusterName;
-    }
-
     public ClusterName getClusterName() {
-        return clusterName();
+        return this.clusterName;
     }
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
+        super.readFrom(in);
         clusterName = ClusterName.readClusterName(in);
         clusterState = ClusterState.Builder.readFrom(in, null);
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
+        super.writeTo(out);
         clusterName.writeTo(out);
         ClusterState.Builder.writeTo(clusterState, out);
     }

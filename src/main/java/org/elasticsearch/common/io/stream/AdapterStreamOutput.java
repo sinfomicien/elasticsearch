@@ -19,6 +19,7 @@
 
 package org.elasticsearch.common.io.stream;
 
+import org.elasticsearch.Version;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.text.Text;
@@ -33,6 +34,13 @@ public class AdapterStreamOutput extends StreamOutput {
 
     public AdapterStreamOutput(StreamOutput out) {
         this.out = out;
+        super.setVersion(out.getVersion());
+    }
+
+    @Override
+    public StreamOutput setVersion(Version version) {
+        out.setVersion(version);
+        return super.setVersion(version);
     }
 
     public void setOut(StreamOutput out) {
@@ -119,11 +127,6 @@ public class AdapterStreamOutput extends StreamOutput {
     }
 
     @Override
-    public void writeUTF(String str) throws IOException {
-        out.writeUTF(str);
-    }
-
-    @Override
     public void writeString(String str) throws IOException {
         out.writeString(str);
     }
@@ -131,6 +134,11 @@ public class AdapterStreamOutput extends StreamOutput {
     @Override
     public void writeText(Text text) throws IOException {
         out.writeText(text);
+    }
+
+    @Override
+    public void writeSharedText(Text text) throws IOException {
+        out.writeSharedText(text);
     }
 
     @Override

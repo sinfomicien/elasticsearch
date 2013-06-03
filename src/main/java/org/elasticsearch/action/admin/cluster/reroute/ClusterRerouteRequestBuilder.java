@@ -20,36 +20,45 @@
 package org.elasticsearch.action.admin.cluster.reroute;
 
 import org.elasticsearch.action.ActionListener;
-import org.elasticsearch.action.admin.cluster.support.BaseClusterRequestBuilder;
+import org.elasticsearch.action.support.master.MasterNodeOperationRequestBuilder;
 import org.elasticsearch.client.ClusterAdminClient;
-import org.elasticsearch.common.unit.TimeValue;
+import org.elasticsearch.client.internal.InternalClusterAdminClient;
+import org.elasticsearch.cluster.routing.allocation.command.AllocationCommand;
+import org.elasticsearch.common.bytes.BytesReference;
 
 /**
  */
-public class ClusterRerouteRequestBuilder extends BaseClusterRequestBuilder<ClusterRerouteRequest, ClusterRerouteResponse> {
+public class ClusterRerouteRequestBuilder extends MasterNodeOperationRequestBuilder<ClusterRerouteRequest, ClusterRerouteResponse, ClusterRerouteRequestBuilder> {
 
     public ClusterRerouteRequestBuilder(ClusterAdminClient clusterClient) {
-        super(clusterClient, new ClusterRerouteRequest());
+        super((InternalClusterAdminClient) clusterClient, new ClusterRerouteRequest());
     }
 
     /**
-     * Sets the master node timeout in case the master has not yet been discovered.
+     * Adds allocation commands to be applied to the cluster. Note, can be empty, in which case
+     * will simply run a simple "reroute".
      */
-    public ClusterRerouteRequestBuilder setMasterNodeTimeout(TimeValue timeout) {
-        request.masterNodeTimeout(timeout);
+    public ClusterRerouteRequestBuilder add(AllocationCommand... commands) {
+        request.add(commands);
         return this;
     }
 
     /**
-     * Sets the master node timeout in case the master has not yet been discovered.
+     * Sets a dry run flag (defaults to <tt>false</tt>) allowing to run the commands without
+     * actually applying them to the cluster state, and getting the resulting cluster state back.
      */
-    public ClusterRerouteRequestBuilder setMasterNodeTimeout(String timeout) {
-        request.masterNodeTimeout(timeout);
+    public ClusterRerouteRequestBuilder setDryRun(boolean dryRun) {
+        request.dryRun(dryRun);
+        return this;
+    }
+
+    public ClusterRerouteRequestBuilder setSource(BytesReference source) throws Exception {
+        request.source(source);
         return this;
     }
 
     @Override
     protected void doExecute(ActionListener<ClusterRerouteResponse> listener) {
-        client.reroute(request, listener);
+        ((ClusterAdminClient) client).reroute(request, listener);
     }
 }

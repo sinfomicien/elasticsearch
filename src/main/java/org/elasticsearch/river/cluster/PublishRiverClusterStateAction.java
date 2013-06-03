@@ -25,8 +25,6 @@ import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
-import org.elasticsearch.common.io.stream.VoidStreamable;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.*;
@@ -77,7 +75,7 @@ public class PublishRiverClusterStateAction extends AbstractComponent {
                 continue;
             }
 
-            transportService.sendRequest(node, PublishClusterStateRequestHandler.ACTION, new PublishClusterStateRequest(clusterState), new VoidTransportResponseHandler(ThreadPool.Names.SAME) {
+            transportService.sendRequest(node, PublishClusterStateRequestHandler.ACTION, new PublishClusterStateRequest(clusterState), new EmptyTransportResponseHandler(ThreadPool.Names.SAME) {
                 @Override
                 public void handleException(TransportException exp) {
                     logger.debug("failed to send cluster state to [{}], should be detected as failed soon...", exp, node);
@@ -86,7 +84,7 @@ public class PublishRiverClusterStateAction extends AbstractComponent {
         }
     }
 
-    private class PublishClusterStateRequest implements Streamable {
+    private class PublishClusterStateRequest extends TransportRequest {
 
         private RiverClusterState clusterState;
 
@@ -99,11 +97,13 @@ public class PublishRiverClusterStateAction extends AbstractComponent {
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
+            super.readFrom(in);
             clusterState = RiverClusterState.Builder.readFrom(in);
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
+            super.writeTo(out);
             RiverClusterState.Builder.writeTo(clusterState, out);
         }
     }
@@ -125,7 +125,7 @@ public class PublishRiverClusterStateAction extends AbstractComponent {
         @Override
         public void messageReceived(PublishClusterStateRequest request, TransportChannel channel) throws Exception {
             listener.onNewClusterState(request.clusterState);
-            channel.sendResponse(VoidStreamable.INSTANCE);
+            channel.sendResponse(TransportResponse.Empty.INSTANCE);
         }
     }
 }

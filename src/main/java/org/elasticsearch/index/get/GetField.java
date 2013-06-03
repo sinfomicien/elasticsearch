@@ -46,27 +46,15 @@ public class GetField implements Streamable, Iterable<Object> {
         this.values = values;
     }
 
-    public String name() {
-        return name;
-    }
-
     public String getName() {
         return name;
     }
 
-    public Object value() {
+    public Object getValue() {
         if (values != null && !values.isEmpty()) {
             return values.get(0);
         }
         return null;
-    }
-
-    public Object getValue() {
-        return value();
-    }
-
-    public List<Object> values() {
-        return values;
     }
 
     public List<Object> getValues() {
@@ -86,7 +74,7 @@ public class GetField implements Streamable, Iterable<Object> {
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
-        name = in.readUTF();
+        name = in.readString();
         int size = in.readVInt();
         values = new ArrayList<Object>(size);
         for (int i = 0; i < size; i++) {
@@ -96,7 +84,7 @@ public class GetField implements Streamable, Iterable<Object> {
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeUTF(name);
+        out.writeString(name);
         out.writeVInt(values.size());
         for (Object obj : values) {
             out.writeGenericValue(obj);

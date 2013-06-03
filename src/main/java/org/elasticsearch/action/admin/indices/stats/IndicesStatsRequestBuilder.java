@@ -20,8 +20,9 @@
 package org.elasticsearch.action.admin.indices.stats;
 
 import org.elasticsearch.action.ActionListener;
-import org.elasticsearch.action.admin.indices.support.BaseIndicesRequestBuilder;
+import org.elasticsearch.action.support.broadcast.BroadcastOperationRequestBuilder;
 import org.elasticsearch.client.IndicesAdminClient;
+import org.elasticsearch.client.internal.InternalIndicesAdminClient;
 
 /**
  * A request to get indices level stats. Allow to enable different stats to be returned.
@@ -32,10 +33,10 @@ import org.elasticsearch.client.IndicesAdminClient;
  * <p>All the stats to be returned can be cleared using {@link #clear()}, at which point, specific
  * stats can be enabled.
  */
-public class IndicesStatsRequestBuilder extends BaseIndicesRequestBuilder<IndicesStatsRequest, IndicesStats> {
+public class IndicesStatsRequestBuilder extends BroadcastOperationRequestBuilder<IndicesStatsRequest, IndicesStatsResponse, IndicesStatsRequestBuilder> {
 
     public IndicesStatsRequestBuilder(IndicesAdminClient indicesClient) {
-        super(indicesClient, new IndicesStatsRequest());
+        super((InternalIndicesAdminClient) indicesClient, new IndicesStatsRequest());
     }
 
     /**
@@ -51,14 +52,6 @@ public class IndicesStatsRequestBuilder extends BaseIndicesRequestBuilder<Indice
      */
     public IndicesStatsRequestBuilder clear() {
         request.clear();
-        return this;
-    }
-
-    /**
-     * Sets specific indices to return the stats for.
-     */
-    public IndicesStatsRequestBuilder setIndices(String... indices) {
-        request.indices(indices);
         return this;
     }
 
@@ -121,8 +114,28 @@ public class IndicesStatsRequestBuilder extends BaseIndicesRequestBuilder<Indice
         return this;
     }
 
+    public IndicesStatsRequestBuilder setFilterCache(boolean filterCache) {
+        request.filterCache(filterCache);
+        return this;
+    }
+
+    public IndicesStatsRequestBuilder setIdCache(boolean idCache) {
+        request.idCache(idCache);
+        return this;
+    }
+
+    public IndicesStatsRequestBuilder setFieldData(boolean fieldData) {
+        request.fieldData(fieldData);
+        return this;
+    }
+
+    public IndicesStatsRequestBuilder setFieldDataFields(String... fields) {
+        request.fieldDataFields(fields);
+        return this;
+    }
+
     @Override
-    protected void doExecute(ActionListener<IndicesStats> listener) {
-        client.stats(request, listener);
+    protected void doExecute(ActionListener<IndicesStatsResponse> listener) {
+        ((IndicesAdminClient) client).stats(request, listener);
     }
 }

@@ -36,11 +36,13 @@ import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.index.query.FilterBuilder;
 import org.elasticsearch.index.query.QueryBuilder;
-import org.elasticsearch.search.facet.AbstractFacetBuilder;
+import org.elasticsearch.search.facet.FacetBuilder;
 import org.elasticsearch.search.highlight.HighlightBuilder;
+import org.elasticsearch.search.rescore.RescoreBuilder;
 import org.elasticsearch.search.sort.SortBuilder;
 import org.elasticsearch.search.sort.SortBuilders;
 import org.elasticsearch.search.sort.SortOrder;
+import org.elasticsearch.search.suggest.SuggestBuilder;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -97,11 +99,15 @@ public class SearchSourceBuilder implements ToXContent {
     private List<ScriptField> scriptFields;
     private List<PartialField> partialFields;
 
-    private List<AbstractFacetBuilder> facets;
+    private List<FacetBuilder> facets;
 
     private BytesReference facetsBinary;
 
     private HighlightBuilder highlightBuilder;
+
+    private SuggestBuilder suggestBuilder;
+
+    private RescoreBuilder rescoreBuilder;
 
     private TObjectFloatHashMap<String> indexBoost = null;
 
@@ -335,7 +341,7 @@ public class SearchSourceBuilder implements ToXContent {
     /**
      * Add a facet to perform as part of the search.
      */
-    public SearchSourceBuilder facet(AbstractFacetBuilder facet) {
+    public SearchSourceBuilder facet(FacetBuilder facet) {
         if (facets == null) {
             facets = Lists.newArrayList();
         }
@@ -398,6 +404,20 @@ public class SearchSourceBuilder implements ToXContent {
     public SearchSourceBuilder highlight(HighlightBuilder highlightBuilder) {
         this.highlightBuilder = highlightBuilder;
         return this;
+    }
+
+    public SuggestBuilder suggest() {
+        if (suggestBuilder == null) {
+            suggestBuilder = new SuggestBuilder("suggest");
+        }
+        return suggestBuilder;
+    }
+
+    public RescoreBuilder rescore() {
+        if (rescoreBuilder == null) {
+            rescoreBuilder = new RescoreBuilder();
+        }
+        return rescoreBuilder;
     }
 
     /**
@@ -691,7 +711,7 @@ public class SearchSourceBuilder implements ToXContent {
         if (facets != null) {
             builder.field("facets");
             builder.startObject();
-            for (AbstractFacetBuilder facet : facets) {
+            for (FacetBuilder facet : facets) {
                 facet.toXContent(builder, params);
             }
             builder.endObject();
@@ -707,6 +727,14 @@ public class SearchSourceBuilder implements ToXContent {
 
         if (highlightBuilder != null) {
             highlightBuilder.toXContent(builder, params);
+        }
+
+        if (suggestBuilder != null) {
+            suggestBuilder.toXContent(builder, params);
+        }
+
+        if (rescoreBuilder != null) {
+            rescoreBuilder.toXContent(builder, params);
         }
 
         if (stats != null) {

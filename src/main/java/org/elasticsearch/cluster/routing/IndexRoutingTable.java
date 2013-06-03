@@ -23,10 +23,12 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
 import com.google.common.collect.UnmodifiableIterator;
+import org.elasticsearch.ElasticSearchIllegalStateException;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.cluster.metadata.MetaData;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.index.shard.ShardId;
 
 import java.io.IOException;
 import java.util.*;
@@ -35,7 +37,19 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static com.google.common.collect.Lists.newArrayList;
 
 /**
- *
+ * The {@link IndexRoutingTable} represents routing information for a single
+ * index. The routing table maintains a list of all shards in the index. A
+ * single shard in this context has one more instances namely exactly one
+ * {@link ShardRouting#primary() primary} and 1 or more replicas. In other
+ * words, each instance of a shard is considered a replica while only one
+ * replica per shard is a <tt>primary</tt> replica. The <tt>primary</tt> replica
+ * can be seen as the "leader" of the shard acting as the primary entry point
+ * for operations on a specific shard.
+ * <p>
+ * Note: The term replica is not directly
+ * reflected in the routing table or in releated classes, replicas are
+ * represented as {@link ShardRouting}.
+ * </p>
  */
 public class IndexRoutingTable implements Iterable<IndexShardRoutingTable> {
 
@@ -67,14 +81,30 @@ public class IndexRoutingTable implements Iterable<IndexShardRoutingTable> {
         this.allActiveShards = allActiveShards.build();
     }
 
+    /**
+     * Return the index id
+     *
+     * @return id of the index
+     */
     public String index() {
         return this.index;
     }
 
+
+    /**
+     * Return the index id
+     *
+     * @return id of the index
+     */
     public String getIndex() {
         return index();
     }
 
+    /**
+     * creates a new {@link IndexRoutingTable} with all shard versions normalized
+     *
+     * @return new {@link IndexRoutingTable}
+     */
     public IndexRoutingTable normalizeVersions() {
         IndexRoutingTable.Builder builder = new Builder(this.index);
         for (IndexShardRoutingTable shardTable : shards.values()) {
@@ -120,6 +150,14 @@ public class IndexRoutingTable implements Iterable<IndexShardRoutingTable> {
         return shards.values().iterator();
     }
 
+    /**
+     * Calculates the number of nodes that hold one or more shards of this index
+     * {@link IndexRoutingTable} excluding the nodes with the node ids give as
+     * the <code>excludedNodes</code> parameter.
+     *
+     * @param excludedNodes id of nodes that will be excluded
+     * @return number of distinct nodes this index has at least one shard allocated on
+     */
     public int numberOfNodesShardsAreAllocatedOn(String... excludedNodes) {
         Set<String> nodes = Sets.newHashSet();
         for (IndexShardRoutingTable shardRoutingTable : this) {
@@ -156,10 +194,18 @@ public class IndexRoutingTable implements Iterable<IndexShardRoutingTable> {
         return shards.get(shardId);
     }
 
+    /**
+     * Returns <code>true</code> if all shards are primary and active. Otherwise <code>false</code>.
+     */
     public boolean allPrimaryShardsActive() {
         return primaryShardsActive() == shards().size();
     }
 
+    /**
+     * Calculates the number of primary shards in active state in routing table
+     *
+     * @return number of active primary shards
+     */
     public int primaryShardsActive() {
         int counter = 0;
         for (IndexShardRoutingTable shardRoutingTable : this) {
@@ -170,10 +216,18 @@ public class IndexRoutingTable implements Iterable<IndexShardRoutingTable> {
         return counter;
     }
 
+    /**
+     * Returns <code>true</code> if all primary shards are in
+     * {@link ShardRoutingState#UNASSIGNED} state. Otherwise <code>false</code>.
+     */
     public boolean allPrimaryShardsUnassigned() {
         return primaryShardsUnassigned() == shards.size();
     }
 
+    /**
+     * Calculates the number of primary shards in the routing table the are in
+     * {@link ShardRoutingState#UNASSIGNED} state.
+     */
     public int primaryShardsUnassigned() {
         int counter = 0;
         for (IndexShardRoutingTable shardRoutingTable : this) {
@@ -184,6 +238,12 @@ public class IndexRoutingTable implements Iterable<IndexShardRoutingTable> {
         return counter;
     }
 
+    /**
+     * Returns a {@link List} of shards that match one of the states listed in {@link ShardRoutingState states}
+     *
+     * @param states a set of {@link ShardRoutingState states}
+     * @return a {@link List} of shards that match one of the given {@link ShardRoutingState states}
+     */
     public List<ShardRouting> shardsWithState(ShardRoutingState... states) {
         List<ShardRouting> shards = newArrayList();
         for (IndexShardRoutingTable shardRoutingTable : this) {
@@ -193,12 +253,15 @@ public class IndexRoutingTable implements Iterable<IndexShardRoutingTable> {
     }
 
     /**
-     * An iterator over all shards (including replicas).
+     * Returns an unordered iterator over all shards (including replicas).
      */
     public ShardsIterator randomAllShardsIt() {
         return new PlainShardsIterator(allShards, counter.incrementAndGet());
     }
 
+    /**
+     * Returns an unordered iterator over all active shards (including replicas).
+     */
     public ShardsIterator randomAllActiveShardsIt() {
         return new PlainShardsIterator(allActiveShards, counter.incrementAndGet());
     }
@@ -221,7 +284,7 @@ public class IndexRoutingTable implements Iterable<IndexShardRoutingTable> {
      * is created for each shard routing.
      * <p/>
      * <p>This basically means that components that use the {@link GroupShardsIterator} will iterate
-     * over *all* the shards (all the replicas) within the index.
+     * over *all* the shards (all the replicas) within the index.</p>
      */
     public GroupShardsIterator groupByAllIt() {
         // use list here since we need to maintain identity across shards
@@ -247,8 +310,15 @@ public class IndexRoutingTable implements Iterable<IndexShardRoutingTable> {
             this.index = index;
         }
 
+        /**
+         * Reads an {@link IndexRoutingTable} from an {@link StreamInput}
+         *
+         * @param in {@link StreamInput} to read the {@link IndexRoutingTable} from
+         * @return {@link IndexRoutingTable} read
+         * @throws IOException if something happens during read
+         */
         public static IndexRoutingTable readFrom(StreamInput in) throws IOException {
-            String index = in.readUTF();
+            String index = in.readString();
             Builder builder = new Builder(index);
 
             int size = in.readVInt();
@@ -259,8 +329,15 @@ public class IndexRoutingTable implements Iterable<IndexShardRoutingTable> {
             return builder.build();
         }
 
+        /**
+         * Writes an {@link IndexRoutingTable} to a {@link StreamOutput}.
+         *
+         * @param index {@link IndexRoutingTable} to write
+         * @param out   {@link StreamOutput} to write to
+         * @throws IOException if something happens during write
+         */
         public static void writeTo(IndexRoutingTable index, StreamOutput out) throws IOException {
-            out.writeUTF(index.index());
+            out.writeString(index.index());
             out.writeVInt(index.shards.size());
             for (IndexShardRoutingTable indexShard : index) {
                 IndexShardRoutingTable.Builder.writeToThin(indexShard, out);
@@ -270,18 +347,30 @@ public class IndexRoutingTable implements Iterable<IndexShardRoutingTable> {
         /**
          * Initializes a new empty index, as if it was created from an API.
          */
-        public Builder initializeEmpty(IndexMetaData indexMetaData) {
+        public Builder initializeAsNew(IndexMetaData indexMetaData) {
             return initializeEmpty(indexMetaData, true);
+        }
+
+        /**
+         * Initializes a new empty index, as if it was created from an API.
+         */
+        public Builder initializeAsRecovery(IndexMetaData indexMetaData) {
+            return initializeEmpty(indexMetaData, false);
         }
 
         /**
          * Initializes a new empty index, with an option to control if its from an API or not.
          */
-        public Builder initializeEmpty(IndexMetaData indexMetaData, boolean fromApi) {
+        private Builder initializeEmpty(IndexMetaData indexMetaData, boolean asNew) {
+            if (!shards.isEmpty()) {
+                throw new ElasticSearchIllegalStateException("trying to initialize an index with fresh shards, but already has shards created");
+            }
             for (int shardId = 0; shardId < indexMetaData.numberOfShards(); shardId++) {
+                IndexShardRoutingTable.Builder indexShardRoutingBuilder = new IndexShardRoutingTable.Builder(new ShardId(indexMetaData.index(), shardId), asNew ? false : true);
                 for (int i = 0; i <= indexMetaData.numberOfReplicas(); i++) {
-                    addShard(shardId, null, i == 0, ShardRoutingState.UNASSIGNED, 0, fromApi);
+                    indexShardRoutingBuilder.addShard(new ImmutableShardRouting(index, shardId, null, i == 0, ShardRoutingState.UNASSIGNED, 0));
                 }
+                shards.put(shardId, indexShardRoutingBuilder.build());
             }
             return this;
         }
@@ -289,7 +378,10 @@ public class IndexRoutingTable implements Iterable<IndexShardRoutingTable> {
         public Builder addReplica() {
             for (int shardId : shards.keySet()) {
                 // version 0, will get updated when reroute will happen
-                addShard(shardId, null, false, ShardRoutingState.UNASSIGNED, 0, false);
+                ImmutableShardRouting shard = new ImmutableShardRouting(index, shardId, null, false, ShardRoutingState.UNASSIGNED, 0);
+                shards.put(shardId,
+                        new IndexShardRoutingTable.Builder(shards.get(shard.id())).addShard(shard).build()
+                );
             }
             return this;
         }
@@ -302,7 +394,7 @@ public class IndexRoutingTable implements Iterable<IndexShardRoutingTable> {
                     return this;
                 }
                 // re-add all the current ones
-                IndexShardRoutingTable.Builder builder = new IndexShardRoutingTable.Builder(indexShard.shardId(), indexShard.allocatedPostApi());
+                IndexShardRoutingTable.Builder builder = new IndexShardRoutingTable.Builder(indexShard.shardId(), indexShard.primaryAllocatedPostApi());
                 for (ShardRouting shardRouting : indexShard) {
                     builder.addShard(new ImmutableShardRouting(shardRouting));
                 }
@@ -334,21 +426,26 @@ public class IndexRoutingTable implements Iterable<IndexShardRoutingTable> {
             return this;
         }
 
-        public Builder addShard(ShardRouting shard, boolean fromApi) {
-            return internalAddShard(new ImmutableShardRouting(shard), fromApi);
+        /**
+         * Clears the post allocation flag for the specified shard
+         */
+        public Builder clearPostAllocationFlag(ShardId shardId) {
+            assert this.index.equals(shardId.index().name());
+            IndexShardRoutingTable indexShard = shards.get(shardId.id());
+            shards.put(indexShard.shardId().id(), new IndexShardRoutingTable(indexShard.shardId(), indexShard.shards(), false));
+            return this;
         }
 
-        private Builder addShard(int shardId, String nodeId, boolean primary, ShardRoutingState state, long version, boolean fromApi) {
-            ImmutableShardRouting shard = new ImmutableShardRouting(index, shardId, nodeId, primary, state, version);
-            return internalAddShard(shard, fromApi);
-        }
-
-        private Builder internalAddShard(ImmutableShardRouting shard, boolean fromApi) {
+        /**
+         * Adds a new shard routing (makes a copy of it), with reference data used from the index shard routing table
+         * if it needs to be created.
+         */
+        public Builder addShard(IndexShardRoutingTable refData, ShardRouting shard) {
             IndexShardRoutingTable indexShard = shards.get(shard.id());
             if (indexShard == null) {
-                indexShard = new IndexShardRoutingTable.Builder(shard.shardId(), fromApi ? false : true).addShard(shard).build();
+                indexShard = new IndexShardRoutingTable.Builder(refData.shardId(), refData.primaryAllocatedPostApi()).addShard(new ImmutableShardRouting(shard)).build();
             } else {
-                indexShard = new IndexShardRoutingTable.Builder(indexShard).addShard(shard).build();
+                indexShard = new IndexShardRoutingTable.Builder(indexShard).addShard(new ImmutableShardRouting(shard)).build();
             }
             shards.put(indexShard.shardId().id(), indexShard);
             return this;
@@ -360,7 +457,6 @@ public class IndexRoutingTable implements Iterable<IndexShardRoutingTable> {
             return indexRoutingTable;
         }
     }
-
 
     public String prettyPrint() {
         StringBuilder sb = new StringBuilder("-- index [" + index + "]\n");

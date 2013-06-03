@@ -22,6 +22,8 @@ package org.elasticsearch.index.query;
 import com.spatial4j.core.shape.Shape;
 import org.elasticsearch.common.Nullable;
 
+import java.util.Collection;
+
 /**
  * A static factory for simple "import static" usage.
  */
@@ -64,6 +66,16 @@ public abstract class QueryBuilders {
      */
     public static MatchQueryBuilder matchQuery(String name, Object text) {
         return new MatchQueryBuilder(name, text).type(MatchQueryBuilder.Type.BOOLEAN);
+    }
+    
+    /**
+     * Creates a common query for the provided field name and text.
+     *
+     * @param name The field name.
+     * @param text The query text (to be analyzed).
+     */
+    public static CommonTermsQueryBuilder commonTerms(String name, Object text) {
+        return new CommonTermsQueryBuilder(name, text);
     }
 
     /**
@@ -355,6 +367,17 @@ public abstract class QueryBuilders {
         return new WildcardQueryBuilder(name, query);
     }
 
+
+    /**
+     * A Query that matches documents containing terms with a specified regular expression.
+     *
+     * @param name   The name of the field
+     * @param regexp The regular expression
+     */
+    public static RegexpQueryBuilder regexpQuery(String name, String regexp) {
+        return new RegexpQueryBuilder(name, regexp);
+    }
+
     /**
      * A query that parses a query string and runs it. There are two modes that this operates. The first,
      * when no field is added (using {@link QueryStringQueryBuilder#field(String)}, will run the query once and non prefixed fields
@@ -419,6 +442,20 @@ public abstract class QueryBuilders {
     public static SpanOrQueryBuilder spanOrQuery() {
         return new SpanOrQueryBuilder();
     }
+    
+    /**
+     * Creates a {@link SpanQueryBuilder} which allows having a sub query
+     * which implements {@link MultiTermQueryBuilder}. This is useful for
+     * having e.g. wildcard or fuzzy queries inside spans.
+     * 
+     * @param multiTermQueryBuilder The {@link MultiTermQueryBuilder} that 
+     * backs the created builder.
+     * @return
+     */
+    
+    public static SpanMultiTermQueryBuilder spanMultiTermQueryBuilder(MultiTermQueryBuilder multiTermQueryBuilder){
+		return new SpanMultiTermQueryBuilder(multiTermQueryBuilder);
+    }
 
     public static FieldMaskingSpanQueryBuilder fieldMaskingSpanQuery(SpanQueryBuilder query, String field) {
         return new FieldMaskingSpanQueryBuilder(query, field);
@@ -453,6 +490,16 @@ public abstract class QueryBuilders {
      */
     public static ConstantScoreQueryBuilder constantScoreQuery(FilterBuilder filterBuilder) {
         return new ConstantScoreQueryBuilder(filterBuilder);
+    }
+    
+    /**
+     * A query that wraps another query and simply returns a constant score equal to the
+     * query boost for every document in the query.
+     *
+     * @param queryBuilder The query to wrap in a constant score query
+     */
+    public static ConstantScoreQueryBuilder constantScoreQuery(QueryBuilder queryBuilder) {
+        return new ConstantScoreQueryBuilder(queryBuilder);
     }
 
     /**
@@ -551,6 +598,17 @@ public abstract class QueryBuilders {
         return new HasChildQueryBuilder(type, query);
     }
 
+    /**
+     * Constructs a new NON scoring parent query, with the parent type and the query to run on the parent documents. The
+     * results of this query are the children docs that those parent docs matched.
+     *
+     * @param type  The parent type.
+     * @param query The query.
+     */
+    public static HasParentQueryBuilder hasParentQuery(String type, QueryBuilder query) {
+        return new HasParentQueryBuilder(type, query);
+    }
+
     public static NestedQueryBuilder nestedQuery(String path, QueryBuilder query) {
         return new NestedQueryBuilder(path, query);
     }
@@ -625,6 +683,16 @@ public abstract class QueryBuilders {
      * @param name   The field name
      * @param values The terms
      */
+    public static TermsQueryBuilder termsQuery(String name, Collection values) {
+        return new TermsQueryBuilder(name, values);
+    }
+
+    /**
+     * A filer for a field based on several terms matching on any of them.
+     *
+     * @param name   The field name
+     * @param values The terms
+     */
     public static TermsQueryBuilder inQuery(String name, String... values) {
         return new TermsQueryBuilder(name, values);
     }
@@ -680,6 +748,16 @@ public abstract class QueryBuilders {
     }
 
     /**
+     * A filer for a field based on several terms matching on any of them.
+     *
+     * @param name   The field name
+     * @param values The terms
+     */
+    public static TermsQueryBuilder inQuery(String name, Collection values) {
+        return new TermsQueryBuilder(name, values);
+    }
+
+    /**
      * A query that will execute the wrapped query only for the specified indices, and "match_all" when
      * it does not match those indices.
      */
@@ -710,6 +788,10 @@ public abstract class QueryBuilders {
      */
     public static GeoShapeQueryBuilder geoShapeQuery(String name, Shape shape) {
         return new GeoShapeQueryBuilder(name, shape);
+    }
+
+    public static GeoShapeQueryBuilder geoShapeQuery(String name, String indexedShapeId, String indexedShapeType) {
+        return new GeoShapeQueryBuilder(name, indexedShapeId, indexedShapeType);
     }
 
     private QueryBuilders() {

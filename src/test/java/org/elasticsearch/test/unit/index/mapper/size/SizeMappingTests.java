@@ -47,8 +47,8 @@ public class SizeMappingTests {
                 .bytes();
         ParsedDocument doc = docMapper.parse(SourceToParse.source(source).type("type").id("1"));
 
-        assertThat(doc.rootDoc().getFieldable("_size").isStored(), equalTo(false));
-        assertThat(doc.rootDoc().getFieldable("_size").tokenStreamValue(), notNullValue());
+        assertThat(doc.rootDoc().getField("_size").fieldType().stored(), equalTo(false));
+        assertThat(doc.rootDoc().getField("_size").tokenStream(docMapper.indexAnalyzer()), notNullValue());
     }
 
     @Test
@@ -65,8 +65,8 @@ public class SizeMappingTests {
                 .bytes();
         ParsedDocument doc = docMapper.parse(SourceToParse.source(source).type("type").id("1"));
 
-        assertThat(doc.rootDoc().getFieldable("_size").isStored(), equalTo(true));
-        assertThat(doc.rootDoc().getFieldable("_size").tokenStreamValue(), notNullValue());
+        assertThat(doc.rootDoc().getField("_size").fieldType().stored(), equalTo(true));
+        assertThat(doc.rootDoc().getField("_size").tokenStream(docMapper.indexAnalyzer()), notNullValue());
     }
 
     @Test
@@ -83,7 +83,7 @@ public class SizeMappingTests {
                 .bytes();
         ParsedDocument doc = docMapper.parse(SourceToParse.source(source).type("type").id("1"));
 
-        assertThat(doc.rootDoc().getFieldable("_size"), nullValue());
+        assertThat(doc.rootDoc().getField("_size"), nullValue());
     }
 
     @Test
@@ -99,6 +99,22 @@ public class SizeMappingTests {
                 .bytes();
         ParsedDocument doc = docMapper.parse(SourceToParse.source(source).type("type").id("1"));
 
-        assertThat(doc.rootDoc().getFieldable("_size"), nullValue());
+        assertThat(doc.rootDoc().getField("_size"), nullValue());
+    }
+
+    @Test
+    public void testThatDisablingWorksWhenMerging() throws Exception {
+        String enabledMapping = XContentFactory.jsonBuilder().startObject().startObject("type")
+                .startObject("_size").field("enabled", true).endObject()
+                .endObject().endObject().string();
+        DocumentMapper enabledMapper = MapperTests.newParser().parse(enabledMapping);
+
+        String disabledMapping = XContentFactory.jsonBuilder().startObject().startObject("type")
+                .startObject("_size").field("enabled", false).endObject()
+                .endObject().endObject().string();
+        DocumentMapper disabledMapper = MapperTests.newParser().parse(disabledMapping);
+
+        enabledMapper.merge(disabledMapper, DocumentMapper.MergeFlags.mergeFlags().simulate(false));
+        assertThat(enabledMapper.SizeFieldMapper().enabled(), is(false));
     }
 }

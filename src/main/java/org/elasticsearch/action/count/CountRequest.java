@@ -22,7 +22,6 @@ package org.elasticsearch.action.count;
 import org.elasticsearch.ElasticSearchGenerationException;
 import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.support.broadcast.BroadcastOperationRequest;
-import org.elasticsearch.action.support.broadcast.BroadcastOperationThreading;
 import org.elasticsearch.client.Requests;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Required;
@@ -52,7 +51,7 @@ import java.util.Map;
  * @see org.elasticsearch.client.Client#count(CountRequest)
  * @see org.elasticsearch.client.Requests#countRequest(String...)
  */
-public class CountRequest extends BroadcastOperationRequest {
+public class CountRequest extends BroadcastOperationRequest<CountRequest> {
 
     private static final XContentType contentType = Requests.CONTENT_TYPE;
 
@@ -61,9 +60,10 @@ public class CountRequest extends BroadcastOperationRequest {
     private float minScore = DEFAULT_MIN_SCORE;
 
     @Nullable
-    protected String queryHint;
-    @Nullable
     protected String routing;
+
+    @Nullable
+    private String preference;
 
     private BytesReference querySource;
     private boolean querySourceUnsafe;
@@ -79,7 +79,6 @@ public class CountRequest extends BroadcastOperationRequest {
      */
     public CountRequest(String... indices) {
         super(indices);
-        this.queryHint = null;
     }
 
     @Override
@@ -88,47 +87,12 @@ public class CountRequest extends BroadcastOperationRequest {
         return validationException;
     }
 
-    public String queryHint() {
-        return queryHint;
-    }
-
-    /**
-     * Controls the operation threading model.
-     */
-    @Override
-    public CountRequest operationThreading(BroadcastOperationThreading operationThreading) {
-        super.operationThreading(operationThreading);
-        return this;
-    }
-
     @Override
     protected void beforeStart() {
         if (querySourceUnsafe) {
             querySource = querySource.copyBytesArray();
             querySourceUnsafe = false;
         }
-    }
-
-    /**
-     * Should the listener be called on a separate thread if needed.
-     */
-    @Override
-    public CountRequest listenerThreaded(boolean threadedListener) {
-        super.listenerThreaded(threadedListener);
-        return this;
-    }
-
-    public CountRequest indices(String... indices) {
-        this.indices = indices;
-        return this;
-    }
-
-    /**
-     * A query hint to optionally later be used when routing the request.
-     */
-    public CountRequest queryHint(String queryHint) {
-        this.queryHint = queryHint;
-        return this;
     }
 
     /**
@@ -259,54 +223,34 @@ public class CountRequest extends BroadcastOperationRequest {
         return this;
     }
 
+    public CountRequest preference(String preference) {
+        this.preference = preference;
+        return this;
+    }
+
+    public String preference() {
+        return this.preference;
+    }
+
     @Override
     public void readFrom(StreamInput in) throws IOException {
         super.readFrom(in);
         minScore = in.readFloat();
-
-        if (in.readBoolean()) {
-            queryHint = in.readUTF();
-        }
-        if (in.readBoolean()) {
-            routing = in.readUTF();
-        }
-
+        routing = in.readOptionalString();
+        preference = in.readOptionalString();
         querySourceUnsafe = false;
         querySource = in.readBytesReference();
-
-        int typesSize = in.readVInt();
-        if (typesSize > 0) {
-            types = new String[typesSize];
-            for (int i = 0; i < typesSize; i++) {
-                types[i] = in.readUTF();
-            }
-        }
+        types = in.readStringArray();
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
         out.writeFloat(minScore);
-
-        if (queryHint == null) {
-            out.writeBoolean(false);
-        } else {
-            out.writeBoolean(true);
-            out.writeUTF(queryHint);
-        }
-        if (routing == null) {
-            out.writeBoolean(false);
-        } else {
-            out.writeBoolean(true);
-            out.writeUTF(routing);
-        }
-
+        out.writeOptionalString(routing);
+        out.writeOptionalString(preference);
         out.writeBytesReference(querySource);
-
-        out.writeVInt(types.length);
-        for (String type : types) {
-            out.writeUTF(type);
-        }
+        out.writeStringArray(types);
     }
 
     @Override

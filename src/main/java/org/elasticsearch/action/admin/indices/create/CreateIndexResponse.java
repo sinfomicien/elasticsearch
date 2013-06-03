@@ -22,16 +22,13 @@ package org.elasticsearch.action.admin.indices.create;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
 
 import java.io.IOException;
 
 /**
  * A response for a create index action.
- *
- *
  */
-public class CreateIndexResponse implements ActionResponse, Streamable {
+public class CreateIndexResponse extends ActionResponse {
 
     private boolean acknowledged;
 
@@ -46,25 +43,19 @@ public class CreateIndexResponse implements ActionResponse, Streamable {
      * Has the index creation been acknowledged by all current cluster nodes within the
      * provided {@link CreateIndexRequest#timeout(org.elasticsearch.common.unit.TimeValue)}.
      */
-    public boolean acknowledged() {
+    public boolean isAcknowledged() {
         return acknowledged;
-    }
-
-    /**
-     * Has the index creation been acknowledged by all current cluster nodes within the
-     * provided {@link CreateIndexRequest#timeout(org.elasticsearch.common.unit.TimeValue)}.
-     */
-    public boolean getAcknowledged() {
-        return acknowledged();
     }
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
+        super.readFrom(in);
         acknowledged = in.readBoolean();
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
+        super.writeTo(out);
         out.writeBoolean(acknowledged);
     }
 }

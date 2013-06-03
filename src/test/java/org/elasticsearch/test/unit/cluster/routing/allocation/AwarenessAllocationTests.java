@@ -23,6 +23,7 @@ import com.google.common.collect.ImmutableMap;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.metadata.MetaData;
 import org.elasticsearch.cluster.routing.RoutingTable;
+import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.cluster.routing.ShardRoutingState;
 import org.elasticsearch.cluster.routing.allocation.AllocationService;
 import org.elasticsearch.common.logging.ESLogger;
@@ -33,11 +34,10 @@ import static org.elasticsearch.cluster.ClusterState.newClusterStateBuilder;
 import static org.elasticsearch.cluster.metadata.IndexMetaData.newIndexMetaDataBuilder;
 import static org.elasticsearch.cluster.metadata.MetaData.newMetaDataBuilder;
 import static org.elasticsearch.cluster.node.DiscoveryNodes.newNodesBuilder;
-import static org.elasticsearch.cluster.routing.RoutingBuilders.indexRoutingTable;
 import static org.elasticsearch.cluster.routing.RoutingBuilders.routingTable;
 import static org.elasticsearch.cluster.routing.ShardRoutingState.*;
-import static org.elasticsearch.test.unit.cluster.routing.allocation.RoutingAllocationTests.newNode;
 import static org.elasticsearch.common.settings.ImmutableSettings.settingsBuilder;
+import static org.elasticsearch.test.unit.cluster.routing.allocation.RoutingAllocationTests.newNode;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
@@ -56,14 +56,14 @@ public class AwarenessAllocationTests {
                 .put("cluster.routing.allocation.awareness.attributes", "rack_id")
                 .build());
 
-        logger.info("Building initial routing table");
+        logger.info("Building initial routing table for 'moveShardOnceNewNodeWithAttributeAdded1'");
 
         MetaData metaData = newMetaDataBuilder()
                 .put(newIndexMetaDataBuilder("test").numberOfShards(1).numberOfReplicas(1))
                 .build();
 
         RoutingTable routingTable = routingTable()
-                .add(indexRoutingTable("test").initializeEmpty(metaData.index("test")))
+                .addAsNew(metaData.index("test"))
                 .build();
 
         ClusterState clusterState = newClusterStateBuilder().metaData(metaData).routingTable(routingTable).build();
@@ -125,14 +125,14 @@ public class AwarenessAllocationTests {
                 .put("cluster.routing.allocation.awareness.attributes", "rack_id")
                 .build());
 
-        logger.info("Building initial routing table");
+        logger.info("Building initial routing table for 'moveShardOnceNewNodeWithAttributeAdded2'");
 
         MetaData metaData = newMetaDataBuilder()
                 .put(newIndexMetaDataBuilder("test").numberOfShards(1).numberOfReplicas(1))
                 .build();
 
         RoutingTable routingTable = routingTable()
-                .add(indexRoutingTable("test").initializeEmpty(metaData.index("test")))
+                .addAsNew(metaData.index("test"))
                 .build();
 
         ClusterState clusterState = newClusterStateBuilder().metaData(metaData).routingTable(routingTable).build();
@@ -195,16 +195,19 @@ public class AwarenessAllocationTests {
                 .put("cluster.routing.allocation.allow_rebalance", "always")
                 .put("cluster.routing.allocation.cluster_concurrent_rebalance", -1)
                 .put("cluster.routing.allocation.awareness.attributes", "rack_id")
+                .put("cluster.routing.allocation.balance.index", 0.0f)
+                .put("cluster.routing.allocation.balance.replica", 1.0f)
+                .put("cluster.routing.allocation.balance.primary", 0.0f)
                 .build());
 
-        logger.info("Building initial routing table");
+        logger.info("Building initial routing table for 'moveShardOnceNewNodeWithAttributeAdded3'");
 
         MetaData metaData = newMetaDataBuilder()
                 .put(newIndexMetaDataBuilder("test").numberOfShards(5).numberOfReplicas(1))
                 .build();
 
         RoutingTable routingTable = routingTable()
-                .add(indexRoutingTable("test").initializeEmpty(metaData.index("test")))
+                .addAsNew(metaData.index("test"))
                 .build();
 
         ClusterState clusterState = newClusterStateBuilder().metaData(metaData).routingTable(routingTable).build();
@@ -216,6 +219,20 @@ public class AwarenessAllocationTests {
         ).build();
         routingTable = strategy.reroute(clusterState).routingTable();
         clusterState = newClusterStateBuilder().state(clusterState).routingTable(routingTable).build();
+
+        for (ShardRouting shard : clusterState.routingNodes().shardsWithState(INITIALIZING)) {
+            logger.info(shard.toString());
+        }
+        for (ShardRouting shard : clusterState.routingNodes().shardsWithState(STARTED)) {
+            logger.info(shard.toString());
+        }
+        for (ShardRouting shard : clusterState.routingNodes().shardsWithState(RELOCATING)) {
+            logger.info(shard.toString());
+        }
+        for (ShardRouting shard : clusterState.routingNodes().shardsWithState(UNASSIGNED)) {
+            logger.info(shard.toString());
+        }
+
         assertThat(clusterState.routingNodes().shardsWithState(INITIALIZING).size(), equalTo(5));
 
         logger.info("--> start the shards (primaries)");
@@ -281,7 +298,7 @@ public class AwarenessAllocationTests {
                 .put("cluster.routing.allocation.awareness.attributes", "rack_id")
                 .build());
 
-        logger.info("Building initial routing table");
+        logger.info("Building initial routing table for 'moveShardOnceNewNodeWithAttributeAdded4'");
 
         MetaData metaData = newMetaDataBuilder()
                 .put(newIndexMetaDataBuilder("test1").numberOfShards(5).numberOfReplicas(1))
@@ -289,8 +306,8 @@ public class AwarenessAllocationTests {
                 .build();
 
         RoutingTable routingTable = routingTable()
-                .add(indexRoutingTable("test1").initializeEmpty(metaData.index("test1")))
-                .add(indexRoutingTable("test2").initializeEmpty(metaData.index("test2")))
+                .addAsNew(metaData.index("test1"))
+                .addAsNew(metaData.index("test2"))
                 .build();
 
         ClusterState clusterState = newClusterStateBuilder().metaData(metaData).routingTable(routingTable).build();
@@ -365,14 +382,14 @@ public class AwarenessAllocationTests {
                 .put("cluster.routing.allocation.awareness.attributes", "rack_id")
                 .build());
 
-        logger.info("Building initial routing table");
+        logger.info("Building initial routing table for 'moveShardOnceNewNodeWithAttributeAdded5'");
 
         MetaData metaData = newMetaDataBuilder()
                 .put(newIndexMetaDataBuilder("test").numberOfShards(1).numberOfReplicas(2))
                 .build();
 
         RoutingTable routingTable = routingTable()
-                .add(indexRoutingTable("test").initializeEmpty(metaData.index("test")))
+                .addAsNew(metaData.index("test"))
                 .build();
 
         ClusterState clusterState = newClusterStateBuilder().metaData(metaData).routingTable(routingTable).build();
@@ -444,14 +461,14 @@ public class AwarenessAllocationTests {
                 .put("cluster.routing.allocation.awareness.attributes", "rack_id")
                 .build());
 
-        logger.info("Building initial routing table");
+        logger.info("Building initial routing table for 'moveShardOnceNewNodeWithAttributeAdded6'");
 
         MetaData metaData = newMetaDataBuilder()
                 .put(newIndexMetaDataBuilder("test").numberOfShards(1).numberOfReplicas(3))
                 .build();
 
         RoutingTable routingTable = routingTable()
-                .add(indexRoutingTable("test").initializeEmpty(metaData.index("test")))
+                .addAsNew(metaData.index("test"))
                 .build();
 
         ClusterState clusterState = newClusterStateBuilder().metaData(metaData).routingTable(routingTable).build();
@@ -526,14 +543,14 @@ public class AwarenessAllocationTests {
                 .put("cluster.routing.allocation.awareness.attributes", "rack_id")
                 .build());
 
-        logger.info("Building initial routing table");
+        logger.info("Building initial routing table for 'fullAwareness1'");
 
         MetaData metaData = newMetaDataBuilder()
                 .put(newIndexMetaDataBuilder("test").numberOfShards(1).numberOfReplicas(1))
                 .build();
 
         RoutingTable routingTable = routingTable()
-                .add(indexRoutingTable("test").initializeEmpty(metaData.index("test")))
+                .addAsNew(metaData.index("test"))
                 .build();
 
         ClusterState clusterState = newClusterStateBuilder().metaData(metaData).routingTable(routingTable).build();
@@ -594,14 +611,14 @@ public class AwarenessAllocationTests {
                 .put("cluster.routing.allocation.awareness.attributes", "rack_id")
                 .build());
 
-        logger.info("Building initial routing table");
+        logger.info("Building initial routing table for 'fullAwareness2'");
 
         MetaData metaData = newMetaDataBuilder()
                 .put(newIndexMetaDataBuilder("test").numberOfShards(1).numberOfReplicas(1))
                 .build();
 
         RoutingTable routingTable = routingTable()
-                .add(indexRoutingTable("test").initializeEmpty(metaData.index("test")))
+                .addAsNew(metaData.index("test"))
                 .build();
 
         ClusterState clusterState = newClusterStateBuilder().metaData(metaData).routingTable(routingTable).build();
@@ -663,9 +680,12 @@ public class AwarenessAllocationTests {
                 .put("cluster.routing.allocation.cluster_concurrent_rebalance", -1)
                 .put("cluster.routing.allocation.awareness.force.rack_id.values", "1,2")
                 .put("cluster.routing.allocation.awareness.attributes", "rack_id")
+                .put("cluster.routing.allocation.balance.index", 0.0f)
+                .put("cluster.routing.allocation.balance.replica", 1.0f)
+                .put("cluster.routing.allocation.balance.primary", 0.0f)
                 .build());
 
-        logger.info("Building initial routing table");
+        logger.info("Building initial routing table for 'fullAwareness3'");
 
         MetaData metaData = newMetaDataBuilder()
                 .put(newIndexMetaDataBuilder("test1").numberOfShards(5).numberOfReplicas(1))
@@ -673,8 +693,8 @@ public class AwarenessAllocationTests {
                 .build();
 
         RoutingTable routingTable = routingTable()
-                .add(indexRoutingTable("test1").initializeEmpty(metaData.index("test1")))
-                .add(indexRoutingTable("test2").initializeEmpty(metaData.index("test2")))
+                .addAsNew(metaData.index("test1"))
+                .addAsNew(metaData.index("test2"))
                 .build();
 
         ClusterState clusterState = newClusterStateBuilder().metaData(metaData).routingTable(routingTable).build();

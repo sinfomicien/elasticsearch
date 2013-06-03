@@ -41,11 +41,11 @@ import java.util.concurrent.ConcurrentMap;
  *
  *
  */
-public class SnapshotDeletionPolicy extends AbstractIndexShardComponent implements IndexDeletionPolicy {
+public class SnapshotDeletionPolicy extends AbstractESDeletionPolicy {
 
     private final IndexDeletionPolicy primary;
 
-    private ConcurrentMap<Long, SnapshotHolder> snapshots = ConcurrentCollections.newConcurrentMap();
+    private final ConcurrentMap<Long, SnapshotHolder> snapshots = ConcurrentCollections.newConcurrentMap();
 
     private volatile List<SnapshotIndexCommit> commits;
 
@@ -128,14 +128,21 @@ public class SnapshotDeletionPolicy extends AbstractIndexShardComponent implemen
         }
     }
 
+    @Override
+    public IndexDeletionPolicy clone() {
+       // Lucene IW makes a clone internally but since we hold on to this instance 
+       // the clone will just be the identity. See RobinEngine recovery why we need this.
+       return this;
+    }
+
     /**
      * Helper method to snapshot a give commit.
      */
     private SnapshotIndexCommit snapshot(SnapshotIndexCommit commit) throws IOException {
-        SnapshotHolder snapshotHolder = snapshots.get(commit.getVersion());
+        SnapshotHolder snapshotHolder = snapshots.get(commit.getGeneration());
         if (snapshotHolder == null) {
             snapshotHolder = new SnapshotHolder(0);
-            snapshots.put(commit.getVersion(), snapshotHolder);
+            snapshots.put(commit.getGeneration(), snapshotHolder);
         }
         snapshotHolder.counter++;
         return new OneTimeReleaseSnapshotIndexCommit(this, commit);

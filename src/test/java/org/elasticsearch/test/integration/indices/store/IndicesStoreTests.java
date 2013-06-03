@@ -21,6 +21,7 @@ package org.elasticsearch.test.integration.indices.store;
 
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
 import org.elasticsearch.client.Client;
+import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.env.NodeEnvironment;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.node.internal.InternalNode;
@@ -64,7 +65,7 @@ public class IndicesStoreTests extends AbstractNodesTests {
     }
 
     @Test
-    public void shardsCleanup() {
+    public void shardsCleanup() throws Exception {
         try {
             client1.admin().indices().prepareDelete("test").execute().actionGet();
         } catch (Exception ex) {
@@ -77,7 +78,8 @@ public class IndicesStoreTests extends AbstractNodesTests {
 
         logger.info("--> running cluster_health");
         ClusterHealthResponse clusterHealth = client1.admin().cluster().health(clusterHealthRequest().waitForGreenStatus()).actionGet();
-        logger.info("--> done cluster_health, status " + clusterHealth.status());
+        assertThat(clusterHealth.isTimedOut(), equalTo(false));
+        logger.info("--> done cluster_health, status " + clusterHealth.getStatus());
 
 
         logger.info("--> making sure that shard and it's replica are allocated on server1 and server2");
@@ -88,7 +90,7 @@ public class IndicesStoreTests extends AbstractNodesTests {
         startNode("server3");
 
         logger.info("--> making sure that shard is not allocated on server3");
-        assertThat(shardDirectory("server3", "test", 0).exists(), equalTo(false));
+        assertThat(waitForShardDeletion(TimeValue.timeValueSeconds(1), "server3", "test", 0), equalTo(false));
 
         File server2Shard = shardDirectory("server2", "test", 0);
         logger.info("--> stopping node server2");
@@ -96,8 +98,9 @@ public class IndicesStoreTests extends AbstractNodesTests {
         assertThat(server2Shard.exists(), equalTo(true));
 
         logger.info("--> running cluster_health");
-        clusterHealth = client1.admin().cluster().health(clusterHealthRequest().waitForGreenStatus()).actionGet();
-        logger.info("--> done cluster_health, status " + clusterHealth.status());
+        clusterHealth = client1.admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForNodes("2")).actionGet();
+        assertThat(clusterHealth.isTimedOut(), equalTo(false));
+        logger.info("--> done cluster_health, status " + clusterHealth.getStatus());
 
         logger.info("--> making sure that shard and it's replica exist on server1, server2 and server3");
         assertThat(shardDirectory("server1", "test", 0).exists(), equalTo(true));
@@ -108,19 +111,30 @@ public class IndicesStoreTests extends AbstractNodesTests {
         startNode("server2");
 
         logger.info("--> running cluster_health");
-        clusterHealth = client1.admin().cluster().health(clusterHealthRequest().waitForGreenStatus()).actionGet();
-        logger.info("--> done cluster_health, status " + clusterHealth.status());
+        clusterHealth = client("server2").admin().cluster().health(clusterHealthRequest().waitForGreenStatus()).actionGet();
+        assertThat(clusterHealth.isTimedOut(), equalTo(false));
+        logger.info("--> done cluster_health, status " + clusterHealth.getStatus());
 
         logger.info("--> making sure that shard and it's replica are allocated on server1 and server3 but not on server2");
         assertThat(shardDirectory("server1", "test", 0).exists(), equalTo(true));
-        assertThat(shardDirectory("server2", "test", 0).exists(), equalTo(false));
         assertThat(shardDirectory("server3", "test", 0).exists(), equalTo(true));
+        assertThat(waitForShardDeletion(TimeValue.timeValueSeconds(1), "server2", "test", 0), equalTo(false));
     }
 
     private File shardDirectory(String server, String index, int shard) {
         InternalNode node = ((InternalNode) node(server));
         NodeEnvironment env = node.injector().getInstance(NodeEnvironment.class);
         return env.shardLocations(new ShardId(index, shard))[0];
+    }
+
+    private boolean waitForShardDeletion(TimeValue timeout, String server, String index, int shard) throws InterruptedException {
+        long start = System.currentTimeMillis();
+        boolean shardExists;
+        do {
+            shardExists = shardDirectory(server, index, shard).exists();
+        }
+        while (shardExists && (System.currentTimeMillis() - start) < timeout.millis());
+        return shardExists;
     }
 
 

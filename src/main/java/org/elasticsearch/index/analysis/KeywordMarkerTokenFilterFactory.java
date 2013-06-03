@@ -19,9 +19,11 @@
 
 package org.elasticsearch.index.analysis;
 
-import org.apache.lucene.analysis.CharArraySet;
-import org.apache.lucene.analysis.KeywordMarkerFilter;
+import java.util.Set;
+
 import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.miscellaneous.SetKeywordMarkerFilter;
+import org.apache.lucene.analysis.util.CharArraySet;
 import org.elasticsearch.ElasticSearchIllegalArgumentException;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.inject.assistedinject.Assisted;
@@ -29,8 +31,6 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.env.Environment;
 import org.elasticsearch.index.Index;
 import org.elasticsearch.index.settings.IndexSettings;
-
-import java.util.Set;
 
 @AnalysisSettingsRequired
 public class KeywordMarkerTokenFilterFactory extends AbstractTokenFilterFactory {
@@ -51,6 +51,6 @@ public class KeywordMarkerTokenFilterFactory extends AbstractTokenFilterFactory 
 
     @Override
     public TokenStream create(TokenStream tokenStream) {
-        return new KeywordMarkerFilter(tokenStream, keywordLookup);
+        return new SetKeywordMarkerFilter(tokenStream, keywordLookup);
     }
 }

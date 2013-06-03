@@ -33,7 +33,6 @@ import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.discovery.MasterNotDiscoveredException;
 import org.elasticsearch.threadpool.ThreadPool;
@@ -60,7 +59,7 @@ public class LocalAllocateDangledIndices extends AbstractComponent {
         this.transportService = transportService;
         this.clusterService = clusterService;
         this.allocationService = allocationService;
-        transportService.registerHandler(new AllocateDangledRequestHandler());
+        transportService.registerHandler(AllocateDangledRequestHandler.ACTION, new AllocateDangledRequestHandler());
     }
 
     public void allocateDangled(IndexMetaData[] indices, final Listener listener) {
@@ -100,14 +99,9 @@ public class LocalAllocateDangledIndices extends AbstractComponent {
         void onFailure(Throwable e);
     }
 
-    class AllocateDangledRequestHandler implements ActionTransportRequestHandler<AllocateDangledRequest> {
+    class AllocateDangledRequestHandler implements TransportRequestHandler<AllocateDangledRequest> {
 
         public static final String ACTION = "/gateway/local/allocate_dangled";
-
-        @Override
-        public String action() {
-            return ACTION;
-        }
 
         @Override
         public AllocateDangledRequest newInstance() {
@@ -140,7 +134,7 @@ public class LocalAllocateDangledIndices extends AbstractComponent {
                         importNeeded = true;
                         metaData.put(indexMetaData, false);
                         blocks.addBlocks(indexMetaData);
-                        routingTableBuilder.add(indexMetaData, false);
+                        routingTableBuilder.addAsRecovery(indexMetaData);
                         sb.append("[").append(indexMetaData.index()).append("/").append(indexMetaData.state()).append("]");
                     }
                     if (!importNeeded) {
@@ -173,7 +167,7 @@ public class LocalAllocateDangledIndices extends AbstractComponent {
         }
     }
 
-    static class AllocateDangledRequest implements Streamable {
+    static class AllocateDangledRequest extends TransportRequest {
 
         DiscoveryNode fromNode;
         IndexMetaData[] indices;
@@ -188,6 +182,7 @@ public class LocalAllocateDangledIndices extends AbstractComponent {
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
+            super.readFrom(in);
             fromNode = DiscoveryNode.readNode(in);
             indices = new IndexMetaData[in.readVInt()];
             for (int i = 0; i < indices.length; i++) {
@@ -197,6 +192,7 @@ public class LocalAllocateDangledIndices extends AbstractComponent {
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
+            super.writeTo(out);
             fromNode.writeTo(out);
             out.writeVInt(indices.length);
             for (IndexMetaData indexMetaData : indices) {
@@ -205,7 +201,7 @@ public class LocalAllocateDangledIndices extends AbstractComponent {
         }
     }
 
-    public static class AllocateDangledResponse implements Streamable {
+    public static class AllocateDangledResponse extends TransportResponse {
 
         private boolean ack;
 
@@ -222,11 +218,13 @@ public class LocalAllocateDangledIndices extends AbstractComponent {
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
+            super.readFrom(in);
             ack = in.readBoolean();
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
+            super.writeTo(out);
             out.writeBoolean(ack);
         }
     }

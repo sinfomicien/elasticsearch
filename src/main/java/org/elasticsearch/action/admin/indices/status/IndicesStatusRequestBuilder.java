@@ -20,24 +20,17 @@
 package org.elasticsearch.action.admin.indices.status;
 
 import org.elasticsearch.action.ActionListener;
-import org.elasticsearch.action.admin.indices.support.BaseIndicesRequestBuilder;
+import org.elasticsearch.action.support.broadcast.BroadcastOperationRequestBuilder;
 import org.elasticsearch.client.IndicesAdminClient;
+import org.elasticsearch.client.internal.InternalIndicesAdminClient;
 
 /**
  *
  */
-public class IndicesStatusRequestBuilder extends BaseIndicesRequestBuilder<IndicesStatusRequest, IndicesStatusResponse> {
+public class IndicesStatusRequestBuilder extends BroadcastOperationRequestBuilder<IndicesStatusRequest, IndicesStatusResponse, IndicesStatusRequestBuilder> {
 
     public IndicesStatusRequestBuilder(IndicesAdminClient indicesClient) {
-        super(indicesClient, new IndicesStatusRequest());
-    }
-
-    /**
-     * Sets specific indices to return the status for.
-     */
-    public IndicesStatusRequestBuilder setIndices(String... indices) {
-        request.indices(indices);
-        return this;
+        super((InternalIndicesAdminClient) indicesClient, new IndicesStatusRequest());
     }
 
     /**
@@ -58,6 +51,6 @@ public class IndicesStatusRequestBuilder extends BaseIndicesRequestBuilder<Indic
 
     @Override
     protected void doExecute(ActionListener<IndicesStatusResponse> listener) {
-        client.status(request, listener);
+        ((IndicesAdminClient) client).status(request, listener);
     }
 }

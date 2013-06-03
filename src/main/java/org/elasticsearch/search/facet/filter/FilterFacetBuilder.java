@@ -22,14 +22,14 @@ package org.elasticsearch.search.facet.filter;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.index.query.FilterBuilder;
 import org.elasticsearch.search.builder.SearchSourceBuilderException;
-import org.elasticsearch.search.facet.AbstractFacetBuilder;
+import org.elasticsearch.search.facet.FacetBuilder;
 
 import java.io.IOException;
 
 /**
  *
  */
-public class FilterFacetBuilder extends AbstractFacetBuilder {
+public class FilterFacetBuilder extends FacetBuilder {
 
     private FilterBuilder filter;
 
@@ -43,15 +43,6 @@ public class FilterFacetBuilder extends AbstractFacetBuilder {
     @Override
     public FilterFacetBuilder global(boolean global) {
         super.global(global);
-        return this;
-    }
-
-    /**
-     * Marks the facet to run in a specific scope.
-     */
-    @Override
-    public FilterFacetBuilder scope(String scope) {
-        super.scope(scope);
         return this;
     }
 

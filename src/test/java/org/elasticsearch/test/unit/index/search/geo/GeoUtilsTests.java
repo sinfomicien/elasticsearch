@@ -19,13 +19,20 @@
 
 package org.elasticsearch.test.unit.index.search.geo;
 
-import org.elasticsearch.index.search.geo.GeoUtils;
-import org.elasticsearch.index.search.geo.Point;
-import org.testng.annotations.Test;
-
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.lessThanOrEqualTo;
 import static org.hamcrest.Matchers.not;
+
+import org.apache.lucene.spatial.prefix.tree.Cell;
+import org.apache.lucene.spatial.prefix.tree.GeohashPrefixTree;
+import org.apache.lucene.spatial.prefix.tree.QuadPrefixTree;
+import org.elasticsearch.common.geo.GeoPoint;
+import org.elasticsearch.common.geo.GeoUtils;
+import org.testng.annotations.Test;
+
+import com.spatial4j.core.context.SpatialContext;
+import com.spatial4j.core.distance.DistanceUtils;
 
 /**
  *
@@ -85,7 +92,7 @@ public class GeoUtilsTests {
         // Now with points, to check for longitude shifting with latitude normalization
         // We've gone past the north pole and down the other side, the longitude will
         // be shifted by 180
-        assertNormalizedPoint(new Point(90.5, 10), new Point(89.5, -170));
+        assertNormalizedPoint(new GeoPoint(90.5, 10), new GeoPoint(89.5, -170));
 
         // Every 10-units, multiple full turns
         for (int shift = -20; shift <= 20; ++shift) {
@@ -199,7 +206,55 @@ public class GeoUtilsTests {
         assertThat(GeoUtils.normalizeLat(+18000000000091.0), equalTo(GeoUtils.normalizeLat(+091.0)));
     }
 
-    private static void assertNormalizedPoint(Point input, Point expected) {
+    @Test
+    public void testPrefixTreeCellSizes() {
+        assertThat(GeoUtils.EARTH_SEMI_MAJOR_AXIS, equalTo(DistanceUtils.EARTH_EQUATORIAL_RADIUS_KM * 1000));
+        assertThat(GeoUtils.quadTreeCellWidth(0), lessThanOrEqualTo(GeoUtils.EARTH_EQUATOR));
+
+        SpatialContext spatialContext = new SpatialContext(true);
+
+        GeohashPrefixTree geohashPrefixTree = new GeohashPrefixTree(spatialContext, GeohashPrefixTree.getMaxLevelsPossible()/2);
+        Cell gNode = geohashPrefixTree.getWorldCell();
+
+        for(int i = 0; i<geohashPrefixTree.getMaxLevels(); i++) {
+            double width = GeoUtils.geoHashCellWidth(i);
+            double height = GeoUtils.geoHashCellHeight(i);
+            double size = GeoUtils.geoHashCellSize(i);
+            double degrees = 360.0 * width / GeoUtils.EARTH_EQUATOR;
+            int level = GeoUtils.quadTreeLevelsForPrecision(size);
+
+            assertThat(GeoUtils.quadTreeCellWidth(level), lessThanOrEqualTo(width));
+            assertThat(GeoUtils.quadTreeCellHeight(level), lessThanOrEqualTo(height));
+            assertThat(GeoUtils.geoHashLevelsForPrecision(size), equalTo(geohashPrefixTree.getLevelForDistance(degrees)));
+
+            assertThat("width at level "+i, gNode.getShape().getBoundingBox().getWidth(), equalTo(360.d * width / GeoUtils.EARTH_EQUATOR));
+            assertThat("height at level "+i, gNode.getShape().getBoundingBox().getHeight(), equalTo(180.d * height / GeoUtils.EARTH_POLAR_DISTANCE));
+
+            gNode = gNode.getSubCells(null).iterator().next();
+        }
+
+        QuadPrefixTree quadPrefixTree = new QuadPrefixTree(spatialContext);
+        Cell qNode = quadPrefixTree.getWorldCell();
+        for (int i = 0; i < QuadPrefixTree.DEFAULT_MAX_LEVELS; i++) {
+
+            double degrees = 360.0/(1L<<i);
+            double width = GeoUtils.quadTreeCellWidth(i);
+            double height = GeoUtils.quadTreeCellHeight(i);
+            double size = GeoUtils.quadTreeCellSize(i);
+            int level = GeoUtils.quadTreeLevelsForPrecision(size);
+
+            assertThat(GeoUtils.quadTreeCellWidth(level), lessThanOrEqualTo(width));
+            assertThat(GeoUtils.quadTreeCellHeight(level), lessThanOrEqualTo(height));
+            assertThat(GeoUtils.quadTreeLevelsForPrecision(size), equalTo(quadPrefixTree.getLevelForDistance(degrees)));
+
+            assertThat("width at level "+i, qNode.getShape().getBoundingBox().getWidth(), equalTo(360.d * width / GeoUtils.EARTH_EQUATOR));
+            assertThat("height at level "+i, qNode.getShape().getBoundingBox().getHeight(), equalTo(180.d * height / GeoUtils.EARTH_POLAR_DISTANCE));
+
+            qNode = qNode.getSubCells(null).iterator().next();
+        }
+    }
+
+    private static void assertNormalizedPoint(GeoPoint input, GeoPoint expected) {
         GeoUtils.normalizePoint(input);
         assertThat(input, equalTo(expected));
     }

@@ -22,14 +22,13 @@ package org.elasticsearch.action.admin.indices.warmer.put;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
 
 import java.io.IOException;
 
 /**
  * The response of put warmer operation.
  */
-public class PutWarmerResponse implements ActionResponse, Streamable {
+public class PutWarmerResponse extends ActionResponse {
 
     private boolean acknowledged;
 
@@ -44,24 +43,19 @@ public class PutWarmerResponse implements ActionResponse, Streamable {
     /**
      * Has the put warmer been ack'ed.
      */
-    public boolean acknowledged() {
+    public boolean isAcknowledged() {
         return acknowledged;
-    }
-
-    /**
-     * Has the put warmer been ack'ed.
-     */
-    public boolean getAcknowledged() {
-        return acknowledged();
     }
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
+        super.readFrom(in);
         acknowledged = in.readBoolean();
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
+        super.writeTo(out);
         out.writeBoolean(acknowledged);
     }
 }

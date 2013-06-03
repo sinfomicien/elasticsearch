@@ -21,8 +21,10 @@ package org.elasticsearch.action.search;
 
 import org.elasticsearch.ElasticSearchIllegalArgumentException;
 import org.elasticsearch.action.ActionListener;
-import org.elasticsearch.action.support.BaseRequestBuilder;
+import org.elasticsearch.action.ActionRequestBuilder;
+import org.elasticsearch.action.support.IgnoreIndices;
 import org.elasticsearch.client.Client;
+import org.elasticsearch.client.internal.InternalClient;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.unit.TimeValue;
@@ -31,22 +33,24 @@ import org.elasticsearch.index.query.FilterBuilder;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.search.Scroll;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
-import org.elasticsearch.search.facet.AbstractFacetBuilder;
+import org.elasticsearch.search.facet.FacetBuilder;
 import org.elasticsearch.search.highlight.HighlightBuilder;
+import org.elasticsearch.search.rescore.RescoreBuilder;
 import org.elasticsearch.search.sort.SortBuilder;
 import org.elasticsearch.search.sort.SortOrder;
+import org.elasticsearch.search.suggest.SuggestBuilder;
 
 import java.util.Map;
 
 /**
  * A search action request builder.
  */
-public class SearchRequestBuilder extends BaseRequestBuilder<SearchRequest, SearchResponse> {
+public class SearchRequestBuilder extends ActionRequestBuilder<SearchRequest, SearchResponse, SearchRequestBuilder> {
 
     private SearchSourceBuilder sourceBuilder;
 
     public SearchRequestBuilder(Client client) {
-        super(client, new SearchRequest());
+        super((InternalClient) client, new SearchRequest());
     }
 
     /**
@@ -125,14 +129,6 @@ public class SearchRequestBuilder extends BaseRequestBuilder<SearchRequest, Sear
     }
 
     /**
-     * A query hint to optionally later be used when routing the request.
-     */
-    public SearchRequestBuilder setQueryHint(String queryHint) {
-        request.queryHint(queryHint);
-        return this;
-    }
-
-    /**
      * A comma separated list of routing values to control the shards the search will be executed on.
      */
     public SearchRequestBuilder setRouting(String routing) {
@@ -176,10 +172,10 @@ public class SearchRequestBuilder extends BaseRequestBuilder<SearchRequest, Sear
     }
 
     /**
-     * Should the listener be called on a separate thread if needed.
+     * Specifies what type of requested indices to ignore. For example indices that don't exist.
      */
-    public SearchRequestBuilder setListenerThreaded(boolean listenerThreaded) {
-        request.listenerThreaded(listenerThreaded);
+    public SearchRequestBuilder setIgnoreIndices(IgnoreIndices ignoreIndices) {
+        request().ignoreIndices(ignoreIndices);
         return this;
     }
 
@@ -489,7 +485,7 @@ public class SearchRequestBuilder extends BaseRequestBuilder<SearchRequest, Sear
     /**
      * Adds a facet to the search operation.
      */
-    public SearchRequestBuilder addFacet(AbstractFacetBuilder facet) {
+    public SearchRequestBuilder addFacet(FacetBuilder facet) {
         sourceBuilder().facet(facet);
         return this;
     }
@@ -641,6 +637,45 @@ public class SearchRequestBuilder extends BaseRequestBuilder<SearchRequest, Sear
 
     public SearchRequestBuilder setHighlighterRequireFieldMatch(boolean requireFieldMatch) {
         highlightBuilder().requireFieldMatch(requireFieldMatch);
+        return this;
+    }
+
+    /**
+     * The highlighter type to use.
+     */
+    public SearchRequestBuilder setHighlighterType(String type) {
+        highlightBuilder().highlighterType(type);
+        return this;
+    }
+
+    public SearchRequestBuilder setHighlighterOptions(Map<String, Object> options) {
+        highlightBuilder().options(options);
+        return this;
+    }
+
+    /**
+     * Delegates to {@link org.elasticsearch.search.suggest.SuggestBuilder#setText(String)}.
+     */
+    public SearchRequestBuilder setSuggestText(String globalText) {
+        suggestBuilder().setText(globalText);
+        return this;
+    }
+
+    /**
+     * Delegates to {@link org.elasticsearch.search.suggest.SuggestBuilder#addSuggestion(org.elasticsearch.search.suggest.SuggestBuilder.SuggestionBuilder)}.
+     */
+    public SearchRequestBuilder addSuggestion(SuggestBuilder.SuggestionBuilder<?> suggestion) {
+        suggestBuilder().addSuggestion(suggestion);
+        return this;
+    }
+
+    public SearchRequestBuilder setRescorer(RescoreBuilder.Rescorer rescorer) {
+        rescoreBuilder().rescorer(rescorer);
+        return this;
+    }
+
+    public SearchRequestBuilder setRescoreWindow(int window) {
+        rescoreBuilder().windowSize(window);
         return this;
     }
 
@@ -803,7 +838,7 @@ public class SearchRequestBuilder extends BaseRequestBuilder<SearchRequest, Sear
         if (sourceBuilder != null) {
             request.source(sourceBuilder());
         }
-        client.search(request, listener);
+        ((Client) client).search(request, listener);
     }
 
     private SearchSourceBuilder sourceBuilder() {
@@ -816,4 +851,13 @@ public class SearchRequestBuilder extends BaseRequestBuilder<SearchRequest, Sear
     private HighlightBuilder highlightBuilder() {
         return sourceBuilder().highlighter();
     }
+
+    private SuggestBuilder suggestBuilder() {
+        return sourceBuilder().suggest();
+    }
+
+    private RescoreBuilder rescoreBuilder() {
+        return sourceBuilder().rescore();
+    }
+
 }

@@ -22,27 +22,21 @@ package org.elasticsearch.action.delete;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
 
 import java.io.IOException;
 
 /**
  * The response of the delete action.
  *
- *
  * @see org.elasticsearch.action.delete.DeleteRequest
  * @see org.elasticsearch.client.Client#delete(DeleteRequest)
  */
-public class DeleteResponse implements ActionResponse, Streamable {
+public class DeleteResponse extends ActionResponse {
 
     private String index;
-
     private String id;
-
     private String type;
-
     private long version;
-
     private boolean notFound;
 
     public DeleteResponse() {
@@ -60,50 +54,22 @@ public class DeleteResponse implements ActionResponse, Streamable {
     /**
      * The index the document was deleted from.
      */
-    public String index() {
-        return this.index;
-    }
-
-    /**
-     * The index the document was deleted from.
-     */
     public String getIndex() {
-        return index;
-    }
-
-    /**
-     * The type of the document deleted.
-     */
-    public String type() {
-        return this.type;
+        return this.index;
     }
 
     /**
      * The type of the document deleted.
      */
     public String getType() {
-        return type;
-    }
-
-    /**
-     * The id of the document deleted.
-     */
-    public String id() {
-        return this.id;
+        return this.type;
     }
 
     /**
      * The id of the document deleted.
      */
     public String getId() {
-        return id;
-    }
-
-    /**
-     * The version of the delete operation.
-     */
-    public long version() {
-        return this.version;
+        return this.id;
     }
 
     /**
@@ -116,31 +82,26 @@ public class DeleteResponse implements ActionResponse, Streamable {
     /**
      * Returns <tt>true</tt> if there was no doc found to delete.
      */
-    public boolean notFound() {
-        return notFound;
-    }
-
-    /**
-     * Returns <tt>true</tt> if there was no doc found to delete.
-     */
     public boolean isNotFound() {
         return notFound;
     }
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
-        index = in.readUTF();
-        id = in.readUTF();
-        type = in.readUTF();
+        super.readFrom(in);
+        index = in.readString();
+        id = in.readString();
+        type = in.readString();
         version = in.readLong();
         notFound = in.readBoolean();
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeUTF(index);
-        out.writeUTF(id);
-        out.writeUTF(type);
+        super.writeTo(out);
+        out.writeString(index);
+        out.writeString(id);
+        out.writeString(type);
         out.writeLong(version);
         out.writeBoolean(notFound);
     }

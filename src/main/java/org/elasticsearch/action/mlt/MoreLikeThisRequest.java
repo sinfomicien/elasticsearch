@@ -21,6 +21,7 @@ package org.elasticsearch.action.mlt;
 
 import org.elasticsearch.ElasticSearchGenerationException;
 import org.elasticsearch.ElasticSearchIllegalArgumentException;
+import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.ValidateActions;
@@ -53,7 +54,7 @@ import static org.elasticsearch.search.Scroll.readScroll;
  * @see org.elasticsearch.client.Requests#moreLikeThisRequest(String)
  * @see org.elasticsearch.action.search.SearchResponse
  */
-public class MoreLikeThisRequest implements ActionRequest {
+public class MoreLikeThisRequest extends ActionRequest<MoreLikeThisRequest> {
 
     private static final XContentType contentType = Requests.CONTENT_TYPE;
 
@@ -62,6 +63,8 @@ public class MoreLikeThisRequest implements ActionRequest {
     private String type;
 
     private String id;
+
+    private String routing;
 
     private String[] fields;
 
@@ -86,8 +89,6 @@ public class MoreLikeThisRequest implements ActionRequest {
     private BytesReference searchSource;
     private boolean searchSourceUnsafe;
 
-    private boolean threadedListener = false;
-
     MoreLikeThisRequest() {
     }
 
@@ -107,7 +108,7 @@ public class MoreLikeThisRequest implements ActionRequest {
     }
 
     /**
-     * The type of document to load from which the "like" query will rutn with.
+     * The type of document to load from which the "like" query will run with.
      */
     public String type() {
         return type;
@@ -140,6 +141,17 @@ public class MoreLikeThisRequest implements ActionRequest {
     public MoreLikeThisRequest id(String id) {
         this.id = id;
         return this;
+    }
+
+    /**
+     * @return The routing for this request. This used for the `get` part of the mlt request.
+     */
+    public String routing() {
+        return routing;
+    }
+
+    public void routing(String routing) {
+        this.routing = routing;
     }
 
     /**
@@ -516,28 +528,12 @@ public class MoreLikeThisRequest implements ActionRequest {
         return validationException;
     }
 
-    /**
-     * Should the listener be called on a separate thread if needed.
-     */
-    @Override
-    public boolean listenerThreaded() {
-        return threadedListener;
-    }
-
-    /**
-     * Should the listener be called on a separate thread if needed.
-     */
-    @Override
-    public ActionRequest listenerThreaded(boolean listenerThreaded) {
-        this.threadedListener = listenerThreaded;
-        return this;
-    }
-
     @Override
     public void readFrom(StreamInput in) throws IOException {
-        index = in.readUTF();
-        type = in.readUTF();
-        id = in.readUTF();
+        super.readFrom(in);
+        index = in.readString();
+        type = in.readString();
+        id = in.readString();
         // no need to pass threading over the network, they are always false when coming throw a thread pool
         int size = in.readVInt();
         if (size == 0) {
@@ -545,7 +541,7 @@ public class MoreLikeThisRequest implements ActionRequest {
         } else {
             fields = new String[size];
             for (int i = 0; i < size; i++) {
-                fields[i] = in.readUTF();
+                fields[i] = in.readString();
             }
         }
 
@@ -556,7 +552,7 @@ public class MoreLikeThisRequest implements ActionRequest {
         if (size > 0) {
             stopWords = new String[size];
             for (int i = 0; i < size; i++) {
-                stopWords[i] = in.readUTF();
+                stopWords[i] = in.readString();
             }
         }
         minDocFreq = in.readVInt();
@@ -566,7 +562,7 @@ public class MoreLikeThisRequest implements ActionRequest {
         boostTerms = in.readFloat();
         searchType = SearchType.fromId(in.readByte());
         if (in.readBoolean()) {
-            searchQueryHint = in.readUTF();
+            searchQueryHint = in.readString();
         }
         size = in.readVInt();
         if (size == 0) {
@@ -576,7 +572,7 @@ public class MoreLikeThisRequest implements ActionRequest {
         } else {
             searchIndices = new String[size - 1];
             for (int i = 0; i < searchIndices.length; i++) {
-                searchIndices[i] = in.readUTF();
+                searchIndices[i] = in.readString();
             }
         }
         size = in.readVInt();
@@ -587,7 +583,7 @@ public class MoreLikeThisRequest implements ActionRequest {
         } else {
             searchTypes = new String[size - 1];
             for (int i = 0; i < searchTypes.length; i++) {
-                searchTypes[i] = in.readUTF();
+                searchTypes[i] = in.readString();
             }
         }
         if (in.readBoolean()) {
@@ -599,19 +595,23 @@ public class MoreLikeThisRequest implements ActionRequest {
 
         searchSize = in.readVInt();
         searchFrom = in.readVInt();
+        if (in.getVersion().onOrAfter(Version.V_0_90_1)) {
+            routing = in.readOptionalString();
+        }
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeUTF(index);
-        out.writeUTF(type);
-        out.writeUTF(id);
+        super.writeTo(out);
+        out.writeString(index);
+        out.writeString(type);
+        out.writeString(id);
         if (fields == null) {
             out.writeVInt(0);
         } else {
             out.writeVInt(fields.length);
             for (String field : fields) {
-                out.writeUTF(field);
+                out.writeString(field);
             }
         }
 
@@ -623,7 +623,7 @@ public class MoreLikeThisRequest implements ActionRequest {
         } else {
             out.writeVInt(stopWords.length);
             for (String stopWord : stopWords) {
-                out.writeUTF(stopWord);
+                out.writeString(stopWord);
             }
         }
         out.writeVInt(minDocFreq);
@@ -637,14 +637,14 @@ public class MoreLikeThisRequest implements ActionRequest {
             out.writeBoolean(false);
         } else {
             out.writeBoolean(true);
-            out.writeUTF(searchQueryHint);
+            out.writeString(searchQueryHint);
         }
         if (searchIndices == null) {
             out.writeVInt(0);
         } else {
             out.writeVInt(searchIndices.length + 1);
             for (String index : searchIndices) {
-                out.writeUTF(index);
+                out.writeString(index);
             }
         }
         if (searchTypes == null) {
@@ -652,7 +652,7 @@ public class MoreLikeThisRequest implements ActionRequest {
         } else {
             out.writeVInt(searchTypes.length + 1);
             for (String type : searchTypes) {
-                out.writeUTF(type);
+                out.writeString(type);
             }
         }
         if (searchScroll == null) {
@@ -665,5 +665,8 @@ public class MoreLikeThisRequest implements ActionRequest {
 
         out.writeVInt(searchSize);
         out.writeVInt(searchFrom);
+        if (out.getVersion().onOrAfter(Version.V_0_90_1)) {
+            out.writeOptionalString(routing);
+        }
     }
 }

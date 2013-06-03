@@ -20,8 +20,9 @@
 package org.elasticsearch.action.admin.indices.create;
 
 import org.elasticsearch.action.ActionListener;
-import org.elasticsearch.action.admin.indices.support.BaseIndicesRequestBuilder;
+import org.elasticsearch.action.support.master.MasterNodeOperationRequestBuilder;
 import org.elasticsearch.client.IndicesAdminClient;
+import org.elasticsearch.client.internal.InternalIndicesAdminClient;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.settings.Settings;
@@ -33,14 +34,14 @@ import java.util.Map;
 /**
  *
  */
-public class CreateIndexRequestBuilder extends BaseIndicesRequestBuilder<CreateIndexRequest, CreateIndexResponse> {
+public class CreateIndexRequestBuilder extends MasterNodeOperationRequestBuilder<CreateIndexRequest, CreateIndexResponse, CreateIndexRequestBuilder> {
 
     public CreateIndexRequestBuilder(IndicesAdminClient indicesClient) {
-        super(indicesClient, new CreateIndexRequest());
+        super((InternalIndicesAdminClient) indicesClient, new CreateIndexRequest());
     }
 
     public CreateIndexRequestBuilder(IndicesAdminClient indicesClient, String index) {
-        super(indicesClient, new CreateIndexRequest(index));
+        super((InternalIndicesAdminClient) indicesClient, new CreateIndexRequest(index));
     }
 
     public CreateIndexRequestBuilder setIndex(String index) {
@@ -102,7 +103,7 @@ public class CreateIndexRequestBuilder extends BaseIndicesRequestBuilder<CreateI
     /**
      * The cause for this index creation.
      */
-    public CreateIndexRequestBuilder cause(String cause) {
+    public CreateIndexRequestBuilder setCause(String cause) {
         request.cause(cause);
         return this;
     }
@@ -169,7 +170,7 @@ public class CreateIndexRequestBuilder extends BaseIndicesRequestBuilder<CreateI
         return this;
     }
 
-    public CreateIndexRequestBuilder setCustom(IndexMetaData.Custom custom) {
+    public CreateIndexRequestBuilder addCustom(IndexMetaData.Custom custom) {
         request.custom(custom);
         return this;
     }
@@ -200,24 +201,8 @@ public class CreateIndexRequestBuilder extends BaseIndicesRequestBuilder<CreateI
         return this;
     }
 
-    /**
-     * Sets the master node timeout in case the master has not yet been discovered.
-     */
-    public CreateIndexRequestBuilder setMasterNodeTimeout(TimeValue timeout) {
-        request.masterNodeTimeout(timeout);
-        return this;
-    }
-
-    /**
-     * Sets the master node timeout in case the master has not yet been discovered.
-     */
-    public CreateIndexRequestBuilder setMasterNodeTimeout(String timeout) {
-        request.masterNodeTimeout(timeout);
-        return this;
-    }
-
     @Override
     protected void doExecute(ActionListener<CreateIndexResponse> listener) {
-        client.create(request, listener);
+        ((IndicesAdminClient) client).create(request, listener);
     }
 }

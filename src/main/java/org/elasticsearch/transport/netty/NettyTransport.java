@@ -26,9 +26,10 @@ import org.elasticsearch.ElasticSearchIllegalStateException;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.component.AbstractLifecycleComponent;
+import org.elasticsearch.common.compress.CompressorFactory;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.io.stream.CachedStreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
+import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.netty.NettyStaticSetup;
 import org.elasticsearch.common.netty.OpenChannelsHandler;
 import org.elasticsearch.common.network.NetworkService;
@@ -43,27 +44,35 @@ import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.monitor.jvm.JvmInfo;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.*;
-import org.elasticsearch.transport.support.TransportStreams;
+import org.elasticsearch.transport.support.TransportStatus;
 import org.jboss.netty.bootstrap.ClientBootstrap;
 import org.jboss.netty.bootstrap.ServerBootstrap;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.channel.*;
 import org.jboss.netty.channel.socket.nio.NioClientSocketChannelFactory;
 import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
+import org.jboss.netty.channel.socket.nio.NioWorkerPool;
 import org.jboss.netty.channel.socket.oio.OioClientSocketChannelFactory;
 import org.jboss.netty.channel.socket.oio.OioServerSocketChannelFactory;
+import org.jboss.netty.util.HashedWheelTimer;
 
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
-import java.util.*;
+import java.nio.channels.CancelledKeyException;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import static org.elasticsearch.common.network.NetworkService.TcpSettings.*;
 import static org.elasticsearch.common.settings.ImmutableSettings.Builder.EMPTY_SETTINGS;
@@ -86,6 +95,7 @@ public class NettyTransport extends AbstractLifecycleComponent<Transport> implem
     private final NetworkService networkService;
 
     final int workerCount;
+    final int bossCount;
 
     final boolean blockingServer;
 
@@ -137,6 +147,9 @@ public class NettyTransport extends AbstractLifecycleComponent<Transport> implem
     private volatile BoundTransportAddress boundAddress;
 
     private final Object[] connectMutex;
+    // this lock is here to make sure we close this transport and disconnect all the client nodes
+    // connections while no connect operations is going on... (this might help with 100% CPU when stopping the transport?)
+    private final ReadWriteLock globalLock = new ReentrantReadWriteLock();
 
     public NettyTransport(ThreadPool threadPool) {
         this(EMPTY_SETTINGS, threadPool, new NetworkService(EMPTY_SETTINGS));
@@ -152,12 +165,17 @@ public class NettyTransport extends AbstractLifecycleComponent<Transport> implem
         this.threadPool = threadPool;
         this.networkService = networkService;
 
+        if (settings.getAsBoolean("netty.epollBugWorkaround", false)) {
+            System.setProperty("org.jboss.netty.epollBugWorkaround", "true");
+        }
+
         this.connectMutex = new Object[500];
         for (int i = 0; i < connectMutex.length; i++) {
             connectMutex[i] = new Object();
         }
 
         this.workerCount = componentSettings.getAsInt("worker_count", Runtime.getRuntime().availableProcessors() * 2);
+        this.bossCount = componentSettings.getAsInt("boss_count", 1);
         this.blockingServer = settings.getAsBoolean("transport.tcp.blocking_server", settings.getAsBoolean(TCP_BLOCKING_SERVER, settings.getAsBoolean(TCP_BLOCKING, false)));
         this.blockingClient = settings.getAsBoolean("transport.tcp.blocking_client", settings.getAsBoolean(TCP_BLOCKING_CLIENT, settings.getAsBoolean(TCP_BLOCKING, false)));
         this.port = componentSettings.get("port", settings.get("transport.tcp.port", "9300-9400"));
@@ -221,8 +239,9 @@ public class NettyTransport extends AbstractLifecycleComponent<Transport> implem
         } else {
             clientBootstrap = new ClientBootstrap(new NioClientSocketChannelFactory(
                     Executors.newCachedThreadPool(daemonThreadFactory(settings, "transport_client_boss")),
-                    Executors.newCachedThreadPool(daemonThreadFactory(settings, "transport_client_worker")),
-                    workerCount));
+                    bossCount,
+                    new NioWorkerPool(Executors.newCachedThreadPool(daemonThreadFactory(settings, "transport_client_worker")), workerCount),
+                    new HashedWheelTimer(daemonThreadFactory(settings, "transport_client_timer"))));
         }
         ChannelPipelineFactory clientPipelineFactory = new ChannelPipelineFactory() {
             @Override
@@ -366,6 +385,7 @@ public class NettyTransport extends AbstractLifecycleComponent<Transport> implem
         threadPool.generic().execute(new Runnable() {
             @Override
             public void run() {
+                globalLock.writeLock().lock();
                 try {
                     for (Iterator<NodeChannels> it = connectedNodes.values().iterator(); it.hasNext(); ) {
                         NodeChannels nodeChannels = it.next();
@@ -402,6 +422,7 @@ public class NettyTransport extends AbstractLifecycleComponent<Transport> implem
                         clientBootstrap = null;
                     }
                 } finally {
+                    globalLock.writeLock().unlock();
                     latch.countDown();
                 }
             }
@@ -464,19 +485,25 @@ public class NettyTransport extends AbstractLifecycleComponent<Transport> implem
             // ignore
         }
         if (isCloseConnectionException(e.getCause())) {
-            // disconnect the node
-            Channel channel = ctx.getChannel();
-            for (Map.Entry<DiscoveryNode, NodeChannels> entry : connectedNodes.entrySet()) {
-                if (entry.getValue().hasChannel(channel)) {
-                    disconnectFromNode(entry.getKey());
-                }
-            }
+            logger.trace("close connection exception caught on transport layer [{}], disconnecting from relevant node", e.getCause(), ctx.getChannel());
+            // close the channel, which will cause a node to be disconnected if relevant
+            ctx.getChannel().close();
+            disconnectFromNodeChannel(ctx.getChannel(), e.getCause());
         } else if (isConnectException(e.getCause())) {
-            if (logger.isTraceEnabled()) {
-                logger.trace("(Ignoring) Exception caught on netty layer [" + ctx.getChannel() + "]", e.getCause());
-            }
+            logger.trace("connect exception caught on transport layer [{}]", e.getCause(), ctx.getChannel());
+            // close the channel as safe measure, which will cause a node to be disconnected if relevant
+            ctx.getChannel().close();
+            disconnectFromNodeChannel(ctx.getChannel(), e.getCause());
+        } else if (e.getCause() instanceof CancelledKeyException) {
+            logger.trace("cancelled key exception caught on transport layer [{}], disconnecting from relevant node", e.getCause(), ctx.getChannel());
+            // close the channel as safe measure, which will cause a node to be disconnected if relevant
+            ctx.getChannel().close();
+            disconnectFromNodeChannel(ctx.getChannel(), e.getCause());
         } else {
-            logger.warn("Exception caught on netty layer [" + ctx.getChannel() + "]", e.getCause());
+            logger.warn("exception caught on transport layer [{}], closing connection", e.getCause(), ctx.getChannel());
+            // close the channel, which will cause a node to be disconnected if relevant
+            ctx.getChannel().close();
+            disconnectFromNodeChannel(ctx.getChannel(), e.getCause());
         }
     }
 
@@ -491,7 +518,7 @@ public class NettyTransport extends AbstractLifecycleComponent<Transport> implem
     }
 
     @Override
-    public <T extends Streamable> void sendRequest(final DiscoveryNode node, final long requestId, final String action, final Streamable message, TransportRequestOptions options) throws IOException, TransportException {
+    public void sendRequest(final DiscoveryNode node, final long requestId, final String action, final TransportRequest request, TransportRequestOptions options) throws IOException, TransportException {
         Channel targetChannel = nodeChannel(node, options);
 
         if (compress) {
@@ -499,8 +526,29 @@ public class NettyTransport extends AbstractLifecycleComponent<Transport> implem
         }
 
         CachedStreamOutput.Entry cachedEntry = CachedStreamOutput.popEntry();
-        TransportStreams.buildRequest(cachedEntry, requestId, action, message, options);
+
+        byte status = 0;
+        status = TransportStatus.setRequest(status);
+
+        if (options.compress()) {
+            status = TransportStatus.setCompress(status);
+            cachedEntry.bytes().skip(NettyHeader.HEADER_SIZE);
+            StreamOutput stream = cachedEntry.handles(CompressorFactory.defaultCompressor());
+            stream.setVersion(node.version());
+            stream.writeString(action);
+            request.writeTo(stream);
+            stream.close();
+        } else {
+            StreamOutput stream = cachedEntry.handles();
+            cachedEntry.bytes().skip(NettyHeader.HEADER_SIZE);
+            stream.setVersion(node.version());
+            stream.writeString(action);
+            request.writeTo(stream);
+            stream.close();
+        }
         ChannelBuffer buffer = cachedEntry.bytes().bytes().toChannelBuffer();
+        NettyHeader.writeHeader(buffer, requestId, status, node.version());
+
         ChannelFuture future = targetChannel.write(buffer);
         future.addListener(new CacheFutureListener(cachedEntry));
         // We handle close connection exception in the #exceptionCaught method, which is the main reason we want to add this future
@@ -534,46 +582,57 @@ public class NettyTransport extends AbstractLifecycleComponent<Transport> implem
 
     public void connectToNode(DiscoveryNode node, boolean light) {
         if (!lifecycle.started()) {
-            throw new ElasticSearchIllegalStateException("Can't add nodes to a stopped transport");
+            throw new ElasticSearchIllegalStateException("can't add nodes to a stopped transport");
         }
         if (node == null) {
-            throw new ConnectTransportException(null, "Can't connect to a null node");
+            throw new ConnectTransportException(null, "can't connect to a null node");
         }
-        synchronized (connectLock(node.id())) {
-            try {
-                NodeChannels nodeChannels = connectedNodes.get(node);
-                if (nodeChannels != null) {
-                    return;
-                }
-
-                if (light) {
-                    nodeChannels = connectToChannelsLight(node);
-                } else {
-                    nodeChannels = new NodeChannels(new Channel[connectionsPerNodeLow], new Channel[connectionsPerNodeMed], new Channel[connectionsPerNodeHigh]);
-                    try {
-                        connectToChannels(nodeChannels, node);
-                    } catch (Exception e) {
-                        nodeChannels.close();
-                        throw e;
-                    }
-                }
-
-                NodeChannels existing = connectedNodes.putIfAbsent(node, nodeChannels);
-                if (existing != null) {
-                    // we are already connected to a node, close this ones
-                    nodeChannels.close();
-                } else {
-                    if (logger.isDebugEnabled()) {
-                        logger.debug("connected to node [{}]", node);
-                    }
-                    transportServiceAdapter.raiseNodeConnected(node);
-                }
-
-            } catch (ConnectTransportException e) {
-                throw e;
-            } catch (Exception e) {
-                throw new ConnectTransportException(node, "General node connection failure", e);
+        globalLock.readLock().lock();
+        try {
+            if (!lifecycle.started()) {
+                throw new ElasticSearchIllegalStateException("can't add nodes to a stopped transport");
             }
+            synchronized (connectLock(node.id())) {
+                if (!lifecycle.started()) {
+                    throw new ElasticSearchIllegalStateException("can't add nodes to a stopped transport");
+                }
+                try {
+                    NodeChannels nodeChannels = connectedNodes.get(node);
+                    if (nodeChannels != null) {
+                        return;
+                    }
+
+                    if (light) {
+                        nodeChannels = connectToChannelsLight(node);
+                    } else {
+                        nodeChannels = new NodeChannels(new Channel[connectionsPerNodeLow], new Channel[connectionsPerNodeMed], new Channel[connectionsPerNodeHigh]);
+                        try {
+                            connectToChannels(nodeChannels, node);
+                        } catch (Exception e) {
+                            nodeChannels.close();
+                            throw e;
+                        }
+                    }
+
+                    NodeChannels existing = connectedNodes.putIfAbsent(node, nodeChannels);
+                    if (existing != null) {
+                        // we are already connected to a node, close this ones
+                        nodeChannels.close();
+                    } else {
+                        if (logger.isDebugEnabled()) {
+                            logger.debug("connected to node [{}]", node);
+                        }
+                        transportServiceAdapter.raiseNodeConnected(node);
+                    }
+
+                } catch (ConnectTransportException e) {
+                    throw e;
+                } catch (Exception e) {
+                    throw new ConnectTransportException(node, "General node connection failure", e);
+                }
+            }
+        } finally {
+            globalLock.readLock().unlock();
         }
     }
 
@@ -685,6 +744,44 @@ public class NettyTransport extends AbstractLifecycleComponent<Transport> implem
         }
     }
 
+    /**
+     * Disconnects from a node, only if the relevant channel is found to be part of the node channels.
+     */
+    private void disconnectFromNode(DiscoveryNode node, Channel channel, String reason) {
+        synchronized (connectLock(node.id())) {
+            NodeChannels nodeChannels = connectedNodes.get(node);
+            if (nodeChannels != null && nodeChannels.hasChannel(channel)) {
+                connectedNodes.remove(node);
+                try {
+                    nodeChannels.close();
+                } finally {
+                    logger.debug("disconnected from [{}], {}", node, reason);
+                    transportServiceAdapter.raiseNodeDisconnected(node);
+                }
+            }
+        }
+    }
+
+    /**
+     * Disconnects from a node if a channel is found as part of that nodes channels.
+     */
+    private void disconnectFromNodeChannel(Channel channel, Throwable failure) {
+        for (DiscoveryNode node : connectedNodes.keySet()) {
+            synchronized (connectLock(node.id())) {
+                NodeChannels nodeChannels = connectedNodes.get(node);
+                if (nodeChannels != null && nodeChannels.hasChannel(channel)) {
+                    connectedNodes.remove(node);
+                    try {
+                        nodeChannels.close();
+                    } finally {
+                        logger.debug("disconnected from [{}] on channel failure", failure, node);
+                        transportServiceAdapter.raiseNodeDisconnected(node);
+                    }
+                }
+            }
+        }
+    }
+
     private Channel nodeChannel(DiscoveryNode node, TransportRequestOptions options) throws ConnectTransportException {
         NodeChannels nodeChannels = connectedNodes.get(node);
         if (nodeChannels == null) {
@@ -712,7 +809,7 @@ public class NettyTransport extends AbstractLifecycleComponent<Transport> implem
 
         @Override
         public void operationComplete(ChannelFuture future) throws Exception {
-            disconnectFromNode(node);
+            disconnectFromNode(node, future.getChannel(), "channel closed event");
         }
     }
 

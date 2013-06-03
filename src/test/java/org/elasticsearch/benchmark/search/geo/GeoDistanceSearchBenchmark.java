@@ -22,11 +22,11 @@ package org.elasticsearch.benchmark.search.geo;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
 import org.elasticsearch.action.search.SearchType;
 import org.elasticsearch.client.Client;
+import org.elasticsearch.common.geo.GeoDistance;
 import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.unit.SizeValue;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.index.query.QueryBuilders;
-import org.elasticsearch.index.search.geo.GeoDistance;
 import org.elasticsearch.node.Node;
 import org.elasticsearch.node.NodeBuilder;
 
@@ -45,7 +45,7 @@ public class GeoDistanceSearchBenchmark {
         Client client = node.client();
 
         ClusterHealthResponse clusterHealthResponse = client.admin().cluster().prepareHealth().setWaitForGreenStatus().execute().actionGet();
-        if (clusterHealthResponse.timedOut()) {
+        if (clusterHealthResponse.isTimedOut()) {
             System.err.println("Failed to wait for green status, bailing");
             System.exit(1);
         }
@@ -54,14 +54,14 @@ public class GeoDistanceSearchBenchmark {
         final long NUM_WARM = 50;
         final long NUM_RUNS = 100;
 
-        if (client.admin().indices().prepareExists("test").execute().actionGet().exists()) {
-            System.out.println("Found an index, count: " + client.prepareCount("test").setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().count());
+        if (client.admin().indices().prepareExists("test").execute().actionGet().isExists()) {
+            System.out.println("Found an index, count: " + client.prepareCount("test").setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().getCount());
         } else {
             String mapping = XContentFactory.jsonBuilder().startObject().startObject("type1")
                     .startObject("properties").startObject("location").field("type", "geo_point").field("lat_lon", true).endObject().endObject()
                     .endObject().endObject().string();
             client.admin().indices().prepareCreate("test")
-                    .setSettings(ImmutableSettings.settingsBuilder().put("number_of_shards", 1).put("number_of_replicas", 0))
+                    .setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards", 1).put("index.number_of_replicas", 0))
                     .addMapping("type1", mapping)
                     .execute().actionGet();
 

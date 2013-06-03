@@ -20,23 +20,32 @@
 package org.elasticsearch.action.search;
 
 import org.elasticsearch.action.ActionListener;
-import org.elasticsearch.action.support.BaseRequestBuilder;
+import org.elasticsearch.action.ActionRequestBuilder;
+import org.elasticsearch.action.support.IgnoreIndices;
 import org.elasticsearch.client.Client;
+import org.elasticsearch.client.internal.InternalClient;
 
 /**
  * A request builder for multiple search requests.
  */
-public class MultiSearchRequestBuilder extends BaseRequestBuilder<MultiSearchRequest, MultiSearchResponse> {
+public class MultiSearchRequestBuilder extends ActionRequestBuilder<MultiSearchRequest, MultiSearchResponse, MultiSearchRequestBuilder> {
 
     public MultiSearchRequestBuilder(Client client) {
-        super(client, new MultiSearchRequest());
+        super((InternalClient) client, new MultiSearchRequest());
     }
 
     /**
      * Add a search request to execute. Note, the order is important, the search response will be returned in the
      * same order as the search requests.
+     * <p/>
+     * If ignoreIndices has been set on the search request, then the ignoreIndices of the multi search request
+     * will not be used (if set).
      */
     public MultiSearchRequestBuilder add(SearchRequest request) {
+        if (request.ignoreIndices() == IgnoreIndices.DEFAULT && request().ignoreIndices() != IgnoreIndices.DEFAULT) {
+            request.ignoreIndices(request().ignoreIndices());
+        }
+
         super.request.add(request);
         return this;
     }
@@ -46,12 +55,25 @@ public class MultiSearchRequestBuilder extends BaseRequestBuilder<MultiSearchReq
      * same order as the search requests.
      */
     public MultiSearchRequestBuilder add(SearchRequestBuilder request) {
+        if (request.request().ignoreIndices() == IgnoreIndices.DEFAULT && request().ignoreIndices() != IgnoreIndices.DEFAULT) {
+            request.request().ignoreIndices(request().ignoreIndices());
+        }
+
         super.request.add(request);
+        return this;
+    }
+
+    /**
+     * Specifies what type of requested indices to ignore. For example indices that don't exist.
+     * Invoke this method before invoking {@link #add(SearchRequestBuilder)}.
+     */
+    public MultiSearchRequestBuilder setIgnoreIndices(IgnoreIndices ignoreIndices) {
+        request().ignoreIndices(ignoreIndices);
         return this;
     }
 
     @Override
     protected void doExecute(ActionListener<MultiSearchResponse> listener) {
-        client.multiSearch(request, listener);
+        ((Client) client).multiSearch(request, listener);
     }
 }

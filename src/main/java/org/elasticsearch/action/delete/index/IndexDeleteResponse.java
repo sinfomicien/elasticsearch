@@ -22,23 +22,17 @@ package org.elasticsearch.action.delete.index;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
 
 import java.io.IOException;
 
 /**
  * Delete by query response executed on a specific index.
- *
- *
  */
-public class IndexDeleteResponse implements ActionResponse, Streamable {
+public class IndexDeleteResponse extends ActionResponse {
 
     private String index;
-
     private int successfulShards;
-
     private int failedShards;
-
     private ShardDeleteResponse[] deleteResponses;
 
     IndexDeleteResponse(String index, int successfulShards, int failedShards, ShardDeleteResponse[] deleteResponses) {
@@ -55,36 +49,15 @@ public class IndexDeleteResponse implements ActionResponse, Streamable {
     /**
      * The index the delete by query operation was executed against.
      */
-    public String index() {
-        return this.index;
-    }
-
-    /**
-     * The index the delete by query operation was executed against.
-     */
     public String getIndex() {
-        return index;
-    }
-
-    /**
-     * The total number of shards the delete by query was executed on.
-     */
-    public int totalShards() {
-        return failedShards + successfulShards;
+        return this.index;
     }
 
     /**
      * The total number of shards the delete by query was executed on.
      */
     public int getTotalShards() {
-        return totalShards();
-    }
-
-    /**
-     * The successful number of shards the delete by query was executed on.
-     */
-    public int successfulShards() {
-        return successfulShards;
+        return failedShards + successfulShards;
     }
 
     /**
@@ -97,24 +70,18 @@ public class IndexDeleteResponse implements ActionResponse, Streamable {
     /**
      * The failed number of shards the delete by query was executed on.
      */
-    public int failedShards() {
-        return failedShards;
-    }
-
-    /**
-     * The failed number of shards the delete by query was executed on.
-     */
     public int getFailedShards() {
         return failedShards;
     }
 
-    public ShardDeleteResponse[] responses() {
+    public ShardDeleteResponse[] getResponses() {
         return this.deleteResponses;
     }
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
-        index = in.readUTF();
+        super.readFrom(in);
+        index = in.readString();
         successfulShards = in.readVInt();
         failedShards = in.readVInt();
         deleteResponses = new ShardDeleteResponse[in.readVInt()];
@@ -126,7 +93,8 @@ public class IndexDeleteResponse implements ActionResponse, Streamable {
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeUTF(index);
+        super.writeTo(out);
+        out.writeString(index);
         out.writeVInt(successfulShards);
         out.writeVInt(failedShards);
         out.writeVInt(deleteResponses.length);

@@ -77,7 +77,7 @@ public class RestGetMappingAction extends BaseRestHandler {
                 try {
                     boolean foundAny = false;
 
-                    MetaData metaData = response.state().metaData();
+                    MetaData metaData = response.getState().metaData();
                     XContentBuilder builder = RestXContentBuilder.restContentBuilder(request);
                     builder.startObject();
 
@@ -117,6 +117,11 @@ public class RestGetMappingAction extends BaseRestHandler {
                                 builder.map(mappingMd.sourceAsMap());
                             }
 
+                            if (indexMetaData.mappings().values().isEmpty() && types.isEmpty()) {
+                                // if no types are specified and no mappings are set for the index, consider this an empty mapping
+                                foundAny = true;
+                            }
+
                             builder.endObject();
                         }
                     }
@@ -124,7 +129,7 @@ public class RestGetMappingAction extends BaseRestHandler {
                     builder.endObject();
 
                     channel.sendResponse(new XContentRestResponse(request, foundAny || indices.length == 0 ? OK : NOT_FOUND, builder));
-                } catch (Exception e) {
+                } catch (Throwable e) {
                     onFailure(e);
                 }
             }

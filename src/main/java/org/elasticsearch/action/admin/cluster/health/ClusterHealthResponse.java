@@ -36,30 +36,19 @@ import static org.elasticsearch.action.admin.cluster.health.ClusterIndexHealth.r
 /**
  *
  */
-public class ClusterHealthResponse implements ActionResponse, Iterable<ClusterIndexHealth> {
+public class ClusterHealthResponse extends ActionResponse implements Iterable<ClusterIndexHealth> {
 
     private String clusterName;
-
     int numberOfNodes = 0;
-
     int numberOfDataNodes = 0;
-
     int activeShards = 0;
-
     int relocatingShards = 0;
-
     int activePrimaryShards = 0;
-
     int initializingShards = 0;
-
     int unassignedShards = 0;
-
     boolean timedOut = false;
-
     ClusterHealthStatus status = ClusterHealthStatus.RED;
-
     private List<String> validationFailures;
-
     Map<String, ClusterIndexHealth> indices = Maps.newHashMap();
 
     ClusterHealthResponse() {
@@ -70,128 +59,69 @@ public class ClusterHealthResponse implements ActionResponse, Iterable<ClusterIn
         this.validationFailures = validationFailures;
     }
 
-    public String clusterName() {
-        return clusterName;
-    }
-
     public String getClusterName() {
-        return clusterName();
-    }
-
-    /**
-     * The validation failures on the cluster level (without index validation failures).
-     */
-    public List<String> validationFailures() {
-        return this.validationFailures;
+        return clusterName;
     }
 
     /**
      * The validation failures on the cluster level (without index validation failures).
      */
     public List<String> getValidationFailures() {
-        return validationFailures();
-    }
-
-    /**
-     * All the validation failures, including index level validation failures.
-     */
-    public List<String> allValidationFailures() {
-        List<String> allFailures = newArrayList(validationFailures());
-        for (ClusterIndexHealth indexHealth : indices.values()) {
-            allFailures.addAll(indexHealth.validationFailures());
-        }
-        return allFailures;
+        return this.validationFailures;
     }
 
     /**
      * All the validation failures, including index level validation failures.
      */
     public List<String> getAllValidationFailures() {
-        return allValidationFailures();
-    }
-
-
-    public int activeShards() {
-        return activeShards;
+        List<String> allFailures = newArrayList(getValidationFailures());
+        for (ClusterIndexHealth indexHealth : indices.values()) {
+            allFailures.addAll(indexHealth.getValidationFailures());
+        }
+        return allFailures;
     }
 
     public int getActiveShards() {
-        return activeShards();
-    }
-
-    public int relocatingShards() {
-        return relocatingShards;
+        return activeShards;
     }
 
     public int getRelocatingShards() {
-        return relocatingShards();
-    }
-
-    public int activePrimaryShards() {
-        return activePrimaryShards;
+        return relocatingShards;
     }
 
     public int getActivePrimaryShards() {
-        return activePrimaryShards();
-    }
-
-    public int initializingShards() {
-        return initializingShards;
+        return activePrimaryShards;
     }
 
     public int getInitializingShards() {
-        return initializingShards();
-    }
-
-    public int unassignedShards() {
-        return unassignedShards;
+        return initializingShards;
     }
 
     public int getUnassignedShards() {
-        return unassignedShards();
-    }
-
-    public int numberOfNodes() {
-        return this.numberOfNodes;
+        return unassignedShards;
     }
 
     public int getNumberOfNodes() {
-        return numberOfNodes();
-    }
-
-    public int numberOfDataNodes() {
-        return this.numberOfDataNodes;
+        return this.numberOfNodes;
     }
 
     public int getNumberOfDataNodes() {
-        return numberOfDataNodes();
+        return this.numberOfDataNodes;
     }
 
     /**
      * <tt>true</tt> if the waitForXXX has timeout out and did not match.
      */
-    public boolean timedOut() {
+    public boolean isTimedOut() {
         return this.timedOut;
     }
 
-    public boolean isTimedOut() {
-        return this.timedOut();
-    }
-
-    public ClusterHealthStatus status() {
+    public ClusterHealthStatus getStatus() {
         return status;
     }
 
-    public ClusterHealthStatus getStatus() {
-        return status();
-    }
-
-    public Map<String, ClusterIndexHealth> indices() {
-        return indices;
-    }
-
     public Map<String, ClusterIndexHealth> getIndices() {
-        return indices();
+        return indices;
     }
 
     @Override
@@ -201,7 +131,8 @@ public class ClusterHealthResponse implements ActionResponse, Iterable<ClusterIn
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
-        clusterName = in.readUTF();
+        super.readFrom(in);
+        clusterName = in.readString();
         activePrimaryShards = in.readVInt();
         activeShards = in.readVInt();
         relocatingShards = in.readVInt();
@@ -213,7 +144,7 @@ public class ClusterHealthResponse implements ActionResponse, Iterable<ClusterIn
         int size = in.readVInt();
         for (int i = 0; i < size; i++) {
             ClusterIndexHealth indexHealth = readClusterIndexHealth(in);
-            indices.put(indexHealth.index(), indexHealth);
+            indices.put(indexHealth.getIndex(), indexHealth);
         }
         timedOut = in.readBoolean();
         size = in.readVInt();
@@ -221,14 +152,15 @@ public class ClusterHealthResponse implements ActionResponse, Iterable<ClusterIn
             validationFailures = ImmutableList.of();
         } else {
             for (int i = 0; i < size; i++) {
-                validationFailures.add(in.readUTF());
+                validationFailures.add(in.readString());
             }
         }
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeUTF(clusterName);
+        super.writeTo(out);
+        out.writeString(clusterName);
         out.writeVInt(activePrimaryShards);
         out.writeVInt(activeShards);
         out.writeVInt(relocatingShards);
@@ -245,7 +177,7 @@ public class ClusterHealthResponse implements ActionResponse, Iterable<ClusterIn
 
         out.writeVInt(validationFailures.size());
         for (String failure : validationFailures) {
-            out.writeUTF(failure);
+            out.writeString(failure);
         }
     }
 

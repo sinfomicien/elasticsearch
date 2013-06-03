@@ -28,6 +28,7 @@ import org.elasticsearch.rest.RestStatus;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.Locale;
 
 /**
  *
@@ -108,7 +109,7 @@ public class ClusterBlock implements Serializable, Streamable, ToXContent {
         }
         builder.startArray("levels");
         for (ClusterBlockLevel level : levels) {
-            builder.value(level.name().toLowerCase());
+            builder.value(level.name().toLowerCase(Locale.ROOT));
         }
         builder.endArray();
         builder.endObject();
@@ -124,7 +125,7 @@ public class ClusterBlock implements Serializable, Streamable, ToXContent {
     @Override
     public void readFrom(StreamInput in) throws IOException {
         id = in.readVInt();
-        description = in.readUTF();
+        description = in.readString();
         levels = new ClusterBlockLevel[in.readVInt()];
         for (int i = 0; i < levels.length; i++) {
             levels[i] = ClusterBlockLevel.fromId(in.readVInt());
@@ -137,7 +138,7 @@ public class ClusterBlock implements Serializable, Streamable, ToXContent {
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         out.writeVInt(id);
-        out.writeUTF(description);
+        out.writeString(description);
         out.writeVInt(levels.length);
         for (ClusterBlockLevel level : levels) {
             out.writeVInt(level.id());

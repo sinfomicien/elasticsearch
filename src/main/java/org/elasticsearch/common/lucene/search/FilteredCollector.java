@@ -19,29 +19,36 @@
 
 package org.elasticsearch.common.lucene.search;
 
-import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.AtomicReaderContext;
 import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.Filter;
 import org.apache.lucene.search.Scorer;
-import org.elasticsearch.common.lucene.docset.DocSet;
-import org.elasticsearch.common.lucene.docset.DocSets;
+import org.apache.lucene.util.Bits;
+import org.elasticsearch.common.lucene.docset.DocIdSets;
 
 import java.io.IOException;
 
 /**
  *
  */
-public class FilteredCollector extends Collector {
+public class FilteredCollector extends XCollector {
 
     private final Collector collector;
 
     private final Filter filter;
 
-    private DocSet docSet;
+    private Bits docSet;
 
     public FilteredCollector(Collector collector, Filter filter) {
         this.collector = collector;
         this.filter = filter;
+    }
+
+    @Override
+    public void postCollection() {
+        if (collector instanceof XCollector) {
+            ((XCollector) collector).postCollection();
+        }
     }
 
     @Override
@@ -57,9 +64,9 @@ public class FilteredCollector extends Collector {
     }
 
     @Override
-    public void setNextReader(IndexReader reader, int docBase) throws IOException {
-        collector.setNextReader(reader, docBase);
-        docSet = DocSets.convert(reader, filter.getDocIdSet(reader));
+    public void setNextReader(AtomicReaderContext context) throws IOException {
+        collector.setNextReader(context);
+        docSet = DocIdSets.toSafeBits(context.reader(), filter.getDocIdSet(context, null));
     }
 
     @Override

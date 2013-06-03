@@ -22,8 +22,8 @@ package org.elasticsearch.index.mapper;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.Document;
 import org.elasticsearch.common.bytes.BytesReference;
+import org.apache.lucene.document.Field;
 
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -31,7 +31,7 @@ import java.util.List;
  */
 public class ParsedDocument {
 
-    private final String uid;
+    private final Field uid, version;
 
     private final String id;
 
@@ -49,16 +49,13 @@ public class ParsedDocument {
 
     private final BytesReference source;
 
-    private boolean mappersAdded;
+    private boolean mappingsModified;
 
     private String parent;
 
-    public ParsedDocument(String uid, String id, String type, String routing, long timestamp, long ttl, Document document, Analyzer analyzer, BytesReference source, boolean mappersAdded) {
-        this(uid, id, type, routing, timestamp, ttl, Arrays.asList(document), analyzer, source, mappersAdded);
-    }
-
-    public ParsedDocument(String uid, String id, String type, String routing, long timestamp, long ttl, List<Document> documents, Analyzer analyzer, BytesReference source, boolean mappersAdded) {
+    public ParsedDocument(Field uid, Field version, String id, String type, String routing, long timestamp, long ttl, List<Document> documents, Analyzer analyzer, BytesReference source, boolean mappingsModified) {
         this.uid = uid;
+        this.version = version;
         this.id = id;
         this.type = type;
         this.routing = routing;
@@ -67,11 +64,15 @@ public class ParsedDocument {
         this.documents = documents;
         this.source = source;
         this.analyzer = analyzer;
-        this.mappersAdded = mappersAdded;
+        this.mappingsModified = mappingsModified;
     }
 
-    public String uid() {
+    public Field uid() {
         return this.uid;
+    }
+
+    public Field version() {
+        return version;
     }
 
     public String id() {
@@ -120,12 +121,13 @@ public class ParsedDocument {
     }
 
     /**
-     * Has the parsed document caused for new mappings to be added.
+     * Has the parsed document caused mappings to be modified?
      */
-    public boolean mappersAdded() {
-        return mappersAdded;
+    public boolean mappingsModified() {
+        return mappingsModified;
     }
 
+    @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
         sb.append("Document ").append("uid[").append(uid).append("] doc [").append(documents).append("]");

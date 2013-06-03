@@ -30,6 +30,8 @@ import org.elasticsearch.action.delete.DeleteRequest;
 import org.elasticsearch.action.delete.DeleteResponse;
 import org.elasticsearch.action.deletebyquery.DeleteByQueryRequest;
 import org.elasticsearch.action.deletebyquery.DeleteByQueryResponse;
+import org.elasticsearch.action.explain.ExplainRequest;
+import org.elasticsearch.action.explain.ExplainResponse;
 import org.elasticsearch.action.get.GetRequest;
 import org.elasticsearch.action.get.GetResponse;
 import org.elasticsearch.action.get.MultiGetRequest;
@@ -40,6 +42,8 @@ import org.elasticsearch.action.mlt.MoreLikeThisRequest;
 import org.elasticsearch.action.percolate.PercolateRequest;
 import org.elasticsearch.action.percolate.PercolateResponse;
 import org.elasticsearch.action.search.*;
+import org.elasticsearch.action.suggest.SuggestRequest;
+import org.elasticsearch.action.suggest.SuggestResponse;
 import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.action.update.UpdateResponse;
 import org.elasticsearch.client.AdminClient;
@@ -147,26 +151,26 @@ public class TransportClient extends AbstractClient {
      */
     public TransportClient(Settings pSettings, boolean loadConfigSettings) throws ElasticSearchException {
         Tuple<Settings, Environment> tuple = InternalSettingsPerparer.prepareSettings(pSettings, loadConfigSettings);
-        Settings settings = settings = settingsBuilder().put(tuple.v1())
+        Settings settings = settingsBuilder().put(tuple.v1())
                 .put("network.server", false)
                 .put("node.client", true)
                 .build();
         this.environment = tuple.v2();
 
-        this.pluginsService = new PluginsService(tuple.v1(), tuple.v2());
+        this.pluginsService = new PluginsService(settings, tuple.v2());
         this.settings = pluginsService.updatedSettings();
 
-        CompressorFactory.configure(settings);
+        CompressorFactory.configure(this.settings);
 
         ModulesBuilder modules = new ModulesBuilder();
-        modules.add(new PluginsModule(settings, pluginsService));
+        modules.add(new PluginsModule(this.settings, pluginsService));
         modules.add(new EnvironmentModule(environment));
-        modules.add(new SettingsModule(settings));
+        modules.add(new SettingsModule(this.settings));
         modules.add(new NetworkModule());
-        modules.add(new ClusterNameModule(settings));
-        modules.add(new ThreadPoolModule(settings));
+        modules.add(new ClusterNameModule(this.settings));
+        modules.add(new ThreadPoolModule(this.settings));
         modules.add(new TransportSearchModule());
-        modules.add(new TransportModule(settings));
+        modules.add(new TransportModule(this.settings));
         modules.add(new ActionModule(true));
         modules.add(new ClientTransportModule());
 
@@ -287,12 +291,12 @@ public class TransportClient extends AbstractClient {
     }
 
     @Override
-    public <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response>> ActionFuture<Response> execute(Action<Request, Response, RequestBuilder> action, Request request) {
+    public <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response, RequestBuilder>> ActionFuture<Response> execute(Action<Request, Response, RequestBuilder> action, Request request) {
         return internalClient.execute(action, request);
     }
 
     @Override
-    public <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response>> void execute(Action<Request, Response, RequestBuilder> action, Request request, ActionListener<Response> listener) {
+    public <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response, RequestBuilder>> void execute(Action<Request, Response, RequestBuilder> action, Request request, ActionListener<Response> listener) {
         internalClient.execute(action, request, listener);
     }
 
@@ -377,6 +381,16 @@ public class TransportClient extends AbstractClient {
     }
 
     @Override
+    public ActionFuture<SuggestResponse> suggest(SuggestRequest request) {
+        return internalClient.suggest(request);
+    }
+
+    @Override
+    public void suggest(SuggestRequest request, ActionListener<SuggestResponse> listener) {
+        internalClient.suggest(request, listener);
+    }
+
+    @Override
     public ActionFuture<SearchResponse> search(SearchRequest request) {
         return internalClient.search(request);
     }
@@ -424,5 +438,15 @@ public class TransportClient extends AbstractClient {
     @Override
     public void percolate(PercolateRequest request, ActionListener<PercolateResponse> listener) {
         internalClient.percolate(request, listener);
+    }
+
+    @Override
+    public ActionFuture<ExplainResponse> explain(ExplainRequest request) {
+        return internalClient.explain(request);
+    }
+
+    @Override
+    public void explain(ExplainRequest request, ActionListener<ExplainResponse> listener) {
+        internalClient.explain(request, listener);
     }
 }

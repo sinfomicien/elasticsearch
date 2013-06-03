@@ -42,75 +42,71 @@ public class ThreadPoolStats implements Streamable, ToXContent, Iterable<ThreadP
         private int queue;
         private int active;
         private long rejected;
+        private int largest;
+        private long completed;
 
         Stats() {
 
         }
 
-        public Stats(String name, int threads, int queue, int active, long rejected) {
+        public Stats(String name, int threads, int queue, int active, long rejected, int largest, long completed) {
             this.name = name;
             this.threads = threads;
             this.queue = queue;
             this.active = active;
             this.rejected = rejected;
-        }
-
-        public String name() {
-            return this.name;
+            this.largest = largest;
+            this.completed = completed;
         }
 
         public String getName() {
             return this.name;
         }
 
-        public int threads() {
-            return this.threads;
-        }
-
         public int getThreads() {
             return this.threads;
-        }
-
-        public int queue() {
-            return this.queue;
         }
 
         public int getQueue() {
             return this.queue;
         }
 
-        public int active() {
-            return this.active;
-        }
-
         public int getActive() {
             return this.active;
-        }
-
-        public long rejected() {
-            return rejected;
         }
 
         public long getRejected() {
             return rejected;
         }
 
+        public int getLargest() {
+            return largest;
+        }
+
+        public long getCompleted() {
+            return this.completed;
+        }
+
         @Override
         public void readFrom(StreamInput in) throws IOException {
-            name = in.readUTF();
+            name = in.readString();
             threads = in.readInt();
             queue = in.readInt();
             active = in.readInt();
             rejected = in.readLong();
+            largest = in.readInt();
+            completed = in.readLong();
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
-            out.writeUTF(name);
+            out.writeString(name);
             out.writeInt(threads);
             out.writeInt(queue);
             out.writeInt(active);
             out.writeLong(rejected);
+            out.writeInt(largest);
+            out.writeLong(completed);
         }
 
         @Override
@@ -127,6 +123,12 @@ public class ThreadPoolStats implements Streamable, ToXContent, Iterable<ThreadP
             }
             if (rejected != -1) {
                 builder.field(Fields.REJECTED, rejected);
+            }
+            if (largest != -1) {
+                builder.field(Fields.LARGEST, largest);
+            }
+            if (completed != -1) {
+                builder.field(Fields.COMPLETED, completed);
             }
             builder.endObject();
             return builder;
@@ -179,6 +181,8 @@ public class ThreadPoolStats implements Streamable, ToXContent, Iterable<ThreadP
         static final XContentBuilderString QUEUE = new XContentBuilderString("queue");
         static final XContentBuilderString ACTIVE = new XContentBuilderString("active");
         static final XContentBuilderString REJECTED = new XContentBuilderString("rejected");
+        static final XContentBuilderString LARGEST = new XContentBuilderString("largest");
+        static final XContentBuilderString COMPLETED = new XContentBuilderString("completed");
     }
 
     @Override

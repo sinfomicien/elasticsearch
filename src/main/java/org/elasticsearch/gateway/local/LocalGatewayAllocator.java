@@ -35,7 +35,7 @@ import org.elasticsearch.cluster.routing.allocation.FailedRerouteAllocation;
 import org.elasticsearch.cluster.routing.allocation.RoutingAllocation;
 import org.elasticsearch.cluster.routing.allocation.StartedRerouteAllocation;
 import org.elasticsearch.cluster.routing.allocation.allocator.GatewayAllocator;
-import org.elasticsearch.cluster.routing.allocation.decider.AllocationDecider;
+import org.elasticsearch.cluster.routing.allocation.decider.Decision;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
@@ -58,9 +58,7 @@ import java.util.concurrent.ConcurrentMap;
  */
 public class LocalGatewayAllocator extends AbstractComponent implements GatewayAllocator {
 
-    static {
-        IndexMetaData.addDynamicSettings("index.recovery.initial_shards");
-    }
+    public static final String INDEX_RECOVERY_INITIAL_SHARDS = "index.recovery.initial_shards";
 
     private final TransportNodesListGatewayStartedShards listGatewayStartedShards;
 
@@ -118,7 +116,7 @@ public class LocalGatewayAllocator extends AbstractComponent implements GatewayA
             }
 
             // this is an API allocation, ignore since we know there is no data...
-            if (!routingNodes.routingTable().index(shard.index()).shard(shard.id()).allocatedPostApi()) {
+            if (!routingNodes.routingTable().index(shard.index()).shard(shard.id()).primaryAllocatedPostApi()) {
                 continue;
             }
 
@@ -156,7 +154,7 @@ public class LocalGatewayAllocator extends AbstractComponent implements GatewayA
             int requiredAllocation = 1;
             try {
                 IndexMetaData indexMetaData = routingNodes.metaData().index(shard.index());
-                String initialShards = indexMetaData.settings().get("index.recovery.initial_shards", settings.get("index.recovery.initial_shards", this.initialShards));
+                String initialShards = indexMetaData.settings().get(INDEX_RECOVERY_INITIAL_SHARDS, settings.get(INDEX_RECOVERY_INITIAL_SHARDS, this.initialShards));
                 if ("quorum".equals(initialShards)) {
                     if (indexMetaData.numberOfReplicas() > 1) {
                         requiredAllocation = ((1 + indexMetaData.numberOfReplicas()) / 2) + 1;
@@ -195,10 +193,10 @@ public class LocalGatewayAllocator extends AbstractComponent implements GatewayA
             Set<DiscoveryNode> noNodes = Sets.newHashSet();
             for (DiscoveryNode discoNode : nodesWithHighestVersion) {
                 RoutingNode node = routingNodes.node(discoNode.id());
-                AllocationDecider.Decision decision = allocation.deciders().canAllocate(shard, node, allocation);
-                if (decision == AllocationDecider.Decision.THROTTLE) {
+                Decision decision = allocation.deciders().canAllocate(shard, node, allocation);
+                if (decision.type() == Decision.Type.THROTTLE) {
                     throttledNodes.add(discoNode);
-                } else if (decision == AllocationDecider.Decision.NO) {
+                } else if (decision.type() == Decision.Type.NO) {
                     noNodes.add(discoNode);
                 } else {
                     if (logger.isDebugEnabled()) {
@@ -258,7 +256,8 @@ public class LocalGatewayAllocator extends AbstractComponent implements GatewayA
                 }
                 // if we can't allocate it on a node, ignore it, for example, this handles
                 // cases for only allocating a replica after a primary
-                if (allocation.deciders().canAllocate(shard, node, allocation).allocate()) {
+                Decision decision = allocation.deciders().canAllocate(shard, node, allocation);
+                if (decision.type() == Decision.Type.YES) {
                     canBeAllocatedToAtLeastOneNode = true;
                     break;
                 }
@@ -292,7 +291,8 @@ public class LocalGatewayAllocator extends AbstractComponent implements GatewayA
                 // check if we can allocate on that node...
                 // we only check for NO, since if this node is THROTTLING and it has enough "same data"
                 // then we will try and assign it next time
-                if (allocation.deciders().canAllocate(shard, node, allocation) == AllocationDecider.Decision.NO) {
+                Decision decision = allocation.deciders().canAllocate(shard, node, allocation);
+                if (decision.type() == Decision.Type.NO) {
                     continue;
                 }
 
@@ -328,7 +328,8 @@ public class LocalGatewayAllocator extends AbstractComponent implements GatewayA
 
             if (lastNodeMatched != null) {
                 // we only check on THROTTLE since we checked before before on NO
-                if (allocation.deciders().canAllocate(shard, lastNodeMatched, allocation) == AllocationDecider.Decision.THROTTLE) {
+                Decision decision = allocation.deciders().canAllocate(shard, lastNodeMatched, allocation);
+                if (decision.type() == Decision.Type.THROTTLE) {
                     if (logger.isTraceEnabled()) {
                         logger.debug("[{}][{}]: throttling allocation [{}] to [{}] in order to reuse its unallocated persistent store with total_size [{}]", shard.index(), shard.id(), shard, lastDiscoNodeMatched, new ByteSizeValue(lastSizeMatched));
                     }
@@ -394,7 +395,7 @@ public class LocalGatewayAllocator extends AbstractComponent implements GatewayA
 
         for (TransportNodesListGatewayStartedShards.NodeLocalGatewayStartedShards nodeShardState : response) {
             // -1 version means it does not exists, which is what the API returns, and what we expect to
-            shardStates.put(nodeShardState.node(), nodeShardState.version());
+            shardStates.put(nodeShardState.getNode(), nodeShardState.version());
         }
         return shardStates;
     }
@@ -441,7 +442,7 @@ public class LocalGatewayAllocator extends AbstractComponent implements GatewayA
 
             for (TransportNodesListShardStoreMetaData.NodeStoreFilesMetaData nodeStoreFilesMetaData : nodesStoreFilesMetaData) {
                 if (nodeStoreFilesMetaData.storeFilesMetaData() != null) {
-                    shardStores.put(nodeStoreFilesMetaData.node(), nodeStoreFilesMetaData.storeFilesMetaData());
+                    shardStores.put(nodeStoreFilesMetaData.getNode(), nodeStoreFilesMetaData.storeFilesMetaData());
                 }
             }
         }

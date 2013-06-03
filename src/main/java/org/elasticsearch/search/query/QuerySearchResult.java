@@ -22,10 +22,11 @@ package org.elasticsearch.search.query;
 import org.apache.lucene.search.TopDocs;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
 import org.elasticsearch.search.SearchShardTarget;
 import org.elasticsearch.search.facet.Facets;
 import org.elasticsearch.search.facet.InternalFacets;
+import org.elasticsearch.search.suggest.Suggest;
+import org.elasticsearch.transport.TransportResponse;
 
 import java.io.IOException;
 
@@ -35,20 +36,15 @@ import static org.elasticsearch.common.lucene.Lucene.writeTopDocs;
 /**
  *
  */
-public class QuerySearchResult implements Streamable, QuerySearchResultProvider {
+public class QuerySearchResult extends TransportResponse implements QuerySearchResultProvider {
 
     private long id;
-
     private SearchShardTarget shardTarget;
-
     private int from;
-
     private int size;
-
     private TopDocs topDocs;
-
     private InternalFacets facets;
-
+    private Suggest suggest;
     private boolean searchTimedOut;
 
     public QuerySearchResult() {
@@ -107,6 +103,14 @@ public class QuerySearchResult implements Streamable, QuerySearchResultProvider 
         this.facets = facets;
     }
 
+    public Suggest suggest() {
+        return suggest;
+    }
+
+    public void suggest(Suggest suggest) {
+        this.suggest = suggest;
+    }
+
     public int from() {
         return from;
     }
@@ -133,6 +137,7 @@ public class QuerySearchResult implements Streamable, QuerySearchResultProvider 
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
+        super.readFrom(in);
         id = in.readLong();
 //        shardTarget = readSearchShardTarget(in);
         from = in.readVInt();
@@ -141,11 +146,15 @@ public class QuerySearchResult implements Streamable, QuerySearchResultProvider 
         if (in.readBoolean()) {
             facets = InternalFacets.readFacets(in);
         }
+        if (in.readBoolean()) {
+            suggest = Suggest.readSuggest(Suggest.Fields.SUGGEST, in);
+        }
         searchTimedOut = in.readBoolean();
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
+        super.writeTo(out);
         out.writeLong(id);
 //        shardTarget.writeTo(out);
         out.writeVInt(from);
@@ -156,6 +165,12 @@ public class QuerySearchResult implements Streamable, QuerySearchResultProvider 
         } else {
             out.writeBoolean(true);
             facets.writeTo(out);
+        }
+        if (suggest == null) {
+            out.writeBoolean(false);
+        } else {
+            out.writeBoolean(true);
+            suggest.writeTo(out);
         }
         out.writeBoolean(searchTimedOut);
     }

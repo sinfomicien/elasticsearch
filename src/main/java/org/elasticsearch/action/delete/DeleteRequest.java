@@ -20,14 +20,11 @@
 package org.elasticsearch.action.delete;
 
 import org.elasticsearch.action.ActionRequestValidationException;
-import org.elasticsearch.action.WriteConsistencyLevel;
-import org.elasticsearch.action.support.replication.ReplicationType;
 import org.elasticsearch.action.support.replication.ShardReplicationOperationRequest;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Required;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.index.VersionType;
 
 import java.io.IOException;
@@ -45,7 +42,7 @@ import static org.elasticsearch.action.ValidateActions.addValidationError;
  * @see org.elasticsearch.client.Client#delete(DeleteRequest)
  * @see org.elasticsearch.client.Requests#deleteRequest(String)
  */
-public class DeleteRequest extends ShardReplicationOperationRequest {
+public class DeleteRequest extends ShardReplicationOperationRequest<DeleteRequest> {
 
     private String type;
     private String id;
@@ -76,6 +73,16 @@ public class DeleteRequest extends ShardReplicationOperationRequest {
         this.id = id;
     }
 
+    public DeleteRequest(DeleteRequest request) {
+        super(request);
+        this.type = request.type();
+        this.id = request.id();
+        this.routing = request.routing();
+        this.refresh = request.refresh();
+        this.version = request.version();
+        this.versionType = request.versionType();
+    }
+
     public DeleteRequest() {
     }
 
@@ -89,52 +96,6 @@ public class DeleteRequest extends ShardReplicationOperationRequest {
             validationException = addValidationError("id is missing", validationException);
         }
         return validationException;
-    }
-
-    /**
-     * Sets the index the delete will happen on.
-     */
-    @Override
-    public DeleteRequest index(String index) {
-        super.index(index);
-        return this;
-    }
-
-    /**
-     * Should the listener be called on a separate thread if needed.
-     */
-    @Override
-    public DeleteRequest listenerThreaded(boolean threadedListener) {
-        super.listenerThreaded(threadedListener);
-        return this;
-    }
-
-    /**
-     * Controls if the operation will be executed on a separate thread when executed locally. Defaults
-     * to <tt>true</tt> when running in embedded mode.
-     */
-    @Override
-    public DeleteRequest operationThreaded(boolean threadedOperation) {
-        super.operationThreaded(threadedOperation);
-        return this;
-    }
-
-    /**
-     * Set the replication type for this operation.
-     */
-    @Override
-    public DeleteRequest replicationType(ReplicationType replicationType) {
-        super.replicationType(replicationType);
-        return this;
-    }
-
-    /**
-     * Sets the consistency level of write. Defaults to {@link org.elasticsearch.action.WriteConsistencyLevel#DEFAULT}
-     */
-    @Override
-    public DeleteRequest consistencyLevel(WriteConsistencyLevel consistencyLevel) {
-        super.consistencyLevel(consistencyLevel);
-        return this;
     }
 
     /**
@@ -166,14 +127,6 @@ public class DeleteRequest extends ShardReplicationOperationRequest {
     @Required
     public DeleteRequest id(String id) {
         this.id = id;
-        return this;
-    }
-
-    /**
-     * A timeout to wait if the index operation can't be performed immediately. Defaults to <tt>1m</tt>.
-     */
-    public DeleteRequest timeout(TimeValue timeout) {
-        this.timeout = timeout;
         return this;
     }
 
@@ -248,11 +201,9 @@ public class DeleteRequest extends ShardReplicationOperationRequest {
     @Override
     public void readFrom(StreamInput in) throws IOException {
         super.readFrom(in);
-        type = in.readUTF();
-        id = in.readUTF();
-        if (in.readBoolean()) {
-            routing = in.readUTF();
-        }
+        type = in.readString();
+        id = in.readString();
+        routing = in.readOptionalString();
         refresh = in.readBoolean();
         version = in.readLong();
         versionType = VersionType.fromValue(in.readByte());
@@ -261,14 +212,9 @@ public class DeleteRequest extends ShardReplicationOperationRequest {
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
-        out.writeUTF(type);
-        out.writeUTF(id);
-        if (routing == null) {
-            out.writeBoolean(false);
-        } else {
-            out.writeBoolean(true);
-            out.writeUTF(routing);
-        }
+        out.writeString(type);
+        out.writeString(id);
+        out.writeOptionalString(routing());
         out.writeBoolean(refresh);
         out.writeLong(version);
         out.writeByte(versionType.getValue());

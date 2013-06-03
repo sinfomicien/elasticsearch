@@ -26,14 +26,9 @@ import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
-import org.elasticsearch.common.io.stream.VoidStreamable;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.threadpool.ThreadPool;
-import org.elasticsearch.transport.BaseTransportRequestHandler;
-import org.elasticsearch.transport.TransportChannel;
-import org.elasticsearch.transport.TransportService;
-import org.elasticsearch.transport.VoidTransportResponseHandler;
+import org.elasticsearch.transport.*;
 
 import java.io.IOException;
 import java.util.List;
@@ -80,7 +75,7 @@ public class NodeIndexDeletedAction extends AbstractComponent {
             });
         } else {
             transportService.sendRequest(clusterService.state().nodes().masterNode(),
-                    NodeIndexDeletedTransportHandler.ACTION, new NodeIndexDeletedMessage(index, nodeId), VoidTransportResponseHandler.INSTANCE_SAME);
+                    NodeIndexDeletedTransportHandler.ACTION, new NodeIndexDeletedMessage(index, nodeId), EmptyTransportResponseHandler.INSTANCE_SAME);
         }
     }
 
@@ -106,7 +101,7 @@ public class NodeIndexDeletedAction extends AbstractComponent {
         @Override
         public void messageReceived(NodeIndexDeletedMessage message, TransportChannel channel) throws Exception {
             innerNodeIndexDeleted(message.index, message.nodeId);
-            channel.sendResponse(VoidStreamable.INSTANCE);
+            channel.sendResponse(TransportResponse.Empty.INSTANCE);
         }
 
         @Override
@@ -115,30 +110,31 @@ public class NodeIndexDeletedAction extends AbstractComponent {
         }
     }
 
-    private static class NodeIndexDeletedMessage implements Streamable {
+    static class NodeIndexDeletedMessage extends TransportRequest {
 
         String index;
-
         String nodeId;
 
-        private NodeIndexDeletedMessage() {
+        NodeIndexDeletedMessage() {
         }
 
-        private NodeIndexDeletedMessage(String index, String nodeId) {
+        NodeIndexDeletedMessage(String index, String nodeId) {
             this.index = index;
             this.nodeId = nodeId;
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
-            out.writeUTF(index);
-            out.writeUTF(nodeId);
+            super.writeTo(out);
+            out.writeString(index);
+            out.writeString(nodeId);
         }
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
-            index = in.readUTF();
-            nodeId = in.readUTF();
+            super.readFrom(in);
+            index = in.readString();
+            nodeId = in.readString();
         }
     }
 }

@@ -19,14 +19,6 @@
 
 package org.elasticsearch.common.bytes;
 
-import com.google.common.base.Charsets;
-import org.elasticsearch.common.Bytes;
-import org.elasticsearch.common.io.stream.ByteBufferStreamInput;
-import org.elasticsearch.common.io.stream.StreamInput;
-import org.jboss.netty.buffer.ChannelBuffer;
-import org.jboss.netty.buffer.ChannelBuffers;
-import org.jboss.netty.util.CharsetUtil;
-
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
@@ -34,6 +26,15 @@ import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CoderResult;
+
+import org.apache.lucene.util.BytesRef;
+import org.elasticsearch.common.io.stream.ByteBufferStreamInput;
+import org.elasticsearch.common.io.stream.StreamInput;
+import org.jboss.netty.buffer.ChannelBuffer;
+import org.jboss.netty.buffer.ChannelBuffers;
+import org.jboss.netty.util.CharsetUtil;
+
+import com.google.common.base.Charsets;
 
 /**
  */
@@ -85,7 +86,7 @@ public class ByteBufferBytesReference implements BytesReference {
     @Override
     public byte[] toBytes() {
         if (!buffer.hasRemaining()) {
-            return Bytes.EMPTY_ARRAY;
+            return BytesRef.EMPTY_BYTES;
         }
         byte[] tmp = new byte[buffer.remaining()];
         buffer.duplicate().get(tmp);
@@ -126,6 +127,16 @@ public class ByteBufferBytesReference implements BytesReference {
     }
 
     @Override
+    public int hashCode() {
+        return Helper.bytesHashCode(this);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        return Helper.bytesEqual(this, (BytesReference) obj);
+    }
+
+    @Override
     public String toUtf8() {
         if (!buffer.hasRemaining()) {
             return "";
@@ -146,5 +157,18 @@ public class ByteBufferBytesReference implements BytesReference {
             throw new IllegalStateException(x);
         }
         return dst.flip().toString();
+    }
+
+    @Override
+    public BytesRef toBytesRef() {
+        if (buffer.hasArray()) {
+            return new BytesRef(buffer.array(), buffer.arrayOffset() + buffer.position(), buffer.remaining());
+        }
+        return new BytesRef(toBytes());
+    }
+
+    @Override
+    public BytesRef copyBytesRef() {
+        return new BytesRef(toBytes());
     }
 }

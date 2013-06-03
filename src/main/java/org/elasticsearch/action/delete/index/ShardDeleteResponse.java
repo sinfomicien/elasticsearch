@@ -22,19 +22,15 @@ package org.elasticsearch.action.delete.index;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
 
 import java.io.IOException;
 
 /**
  * Delete response executed on a specific shard.
- *
- *
  */
-public class ShardDeleteResponse implements ActionResponse, Streamable {
+public class ShardDeleteResponse extends ActionResponse {
 
     private long version;
-
     private boolean notFound;
 
     public ShardDeleteResponse() {
@@ -45,22 +41,24 @@ public class ShardDeleteResponse implements ActionResponse, Streamable {
         this.notFound = notFound;
     }
 
-    public long version() {
+    public long getVersion() {
         return version;
     }
 
-    public boolean notFound() {
+    public boolean isNotFound() {
         return notFound;
     }
 
     @Override
     public void readFrom(StreamInput in) throws IOException {
+        super.readFrom(in);
         version = in.readLong();
         notFound = in.readBoolean();
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
+        super.writeTo(out);
         out.writeLong(version);
         out.writeBoolean(notFound);
     }

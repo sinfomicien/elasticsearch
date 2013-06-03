@@ -19,6 +19,8 @@
 
 package org.elasticsearch.common.io.stream;
 
+import org.apache.lucene.util.BytesRef;
+import org.elasticsearch.Version;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.io.UTF8StreamWriter;
@@ -36,6 +38,17 @@ import java.util.Map;
  *
  */
 public abstract class StreamOutput extends OutputStream {
+
+    private Version version = Version.CURRENT;
+
+    public Version getVersion() {
+        return this.version;
+    }
+
+    public StreamOutput setVersion(Version version) {
+        this.version = version;
+        return this;
+    }
 
     public boolean seekPositionSupported() {
         return false;
@@ -94,6 +107,15 @@ public abstract class StreamOutput extends OutputStream {
         bytes.writeTo(this);
     }
 
+    public void writeBytesRef(BytesRef bytes) throws IOException {
+        if (bytes == null) {
+            writeVInt(0);
+            return;
+        }
+        writeVInt(bytes.length);
+        write(bytes.bytes, bytes.offset, bytes.length);
+    }
+
     public final void writeShort(short v) throws IOException {
         writeByte((byte) (v >> 8));
         writeByte((byte) v);
@@ -143,22 +165,20 @@ public abstract class StreamOutput extends OutputStream {
         writeByte((byte) i);
     }
 
-    @Deprecated
-    public void writeOptionalUTF(@Nullable String str) throws IOException {
-        if (str == null) {
-            writeBoolean(false);
-        } else {
-            writeBoolean(true);
-            writeUTF(str);
-        }
-    }
-
     public void writeOptionalString(@Nullable String str) throws IOException {
         if (str == null) {
             writeBoolean(false);
         } else {
             writeBoolean(true);
             writeString(str);
+        }
+    }
+
+    public void writeOptionalText(@Nullable Text text) throws IOException {
+        if (text == null) {
+            writeInt(-1);
+        } else {
+            writeText(text);
         }
     }
 
@@ -182,6 +202,10 @@ public abstract class StreamOutput extends OutputStream {
         }
     }
 
+    public void writeSharedText(Text text) throws IOException {
+        writeText(text);
+    }
+
     public void writeString(String str) throws IOException {
         int charCount = str.length();
         writeVInt(charCount);
@@ -201,16 +225,6 @@ public abstract class StreamOutput extends OutputStream {
         }
     }
 
-    /**
-     * Writes a string.
-     *
-     * @deprecated use {@link #writeString(String)}
-     */
-    @Deprecated
-    public void writeUTF(String str) throws IOException {
-        writeString(str);
-    }
-
     public void writeFloat(float v) throws IOException {
         writeInt(Float.floatToIntBits(v));
     }
@@ -222,12 +236,21 @@ public abstract class StreamOutput extends OutputStream {
 
     private static byte ZERO = 0;
     private static byte ONE = 1;
+    private static byte TWO = 2;
 
     /**
      * Writes a boolean.
      */
     public void writeBoolean(boolean b) throws IOException {
         writeByte(b ? ONE : ZERO);
+    }
+
+    public void writeOptionalBoolean(@Nullable Boolean b) throws IOException {
+        if (b == null) {
+            writeByte(TWO);
+        } else {
+            writeByte(b ? ONE : ZERO);
+        }
     }
 
     /**
@@ -256,6 +279,20 @@ public abstract class StreamOutput extends OutputStream {
         writeVInt(array.length);
         for (String s : array) {
             writeString(s);
+        }
+    }
+
+    /**
+     * Writes a string array, for nullable string, writes it as 0 (empty string).
+     */
+    public void writeStringArrayNullable(@Nullable String[] array) throws IOException {
+        if (array == null) {
+            writeVInt(0);
+        } else {
+            writeVInt(array.length);
+            for (String s : array) {
+                writeString(s);
+            }
         }
     }
 
@@ -314,7 +351,7 @@ public abstract class StreamOutput extends OutputStream {
             Map<String, Object> map = (Map<String, Object>) value;
             writeVInt(map.size());
             for (Map.Entry<String, Object> entry : map.entrySet()) {
-                writeUTF(entry.getKey());
+                writeString(entry.getKey());
                 writeGenericValue(entry.getValue());
             }
         } else if (type == Byte.class) {
@@ -329,6 +366,12 @@ public abstract class StreamOutput extends OutputStream {
         } else if (value instanceof BytesReference) {
             writeByte((byte) 14);
             writeBytesReference((BytesReference) value);
+        } else if (value instanceof Text) {
+            writeByte((byte) 15);
+            writeText((Text) value);
+        } else if (type == Short.class) {
+            writeByte((byte) 16);
+            writeShort((Short) value);
         } else {
             throw new IOException("Can't write type [" + type + "]");
         }

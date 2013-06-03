@@ -40,8 +40,8 @@ import org.elasticsearch.index.service.IndexService;
 import org.elasticsearch.index.shard.service.IndexShard;
 import org.elasticsearch.indices.IndicesService;
 import org.elasticsearch.script.ScriptService;
-import org.elasticsearch.search.internal.InternalSearchRequest;
 import org.elasticsearch.search.internal.SearchContext;
+import org.elasticsearch.search.internal.ShardSearchRequest;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
 
@@ -103,7 +103,7 @@ public class TransportValidateQueryAction extends TransportBroadcastOperationAct
     protected GroupShardsIterator shards(ClusterState clusterState, ValidateQueryRequest request, String[] concreteIndices) {
         // Hard-code routing to limit request to a single shard, but still, randomize it...
         Map<String, Set<String>> routingMap = clusterState.metaData().resolveSearchRouting(Integer.toString(ThreadLocalRandom.current().nextInt(1000)), request.indices());
-        return clusterService.operationRouting().searchShards(clusterState, request.indices(), concreteIndices, null, routingMap, "_local");
+        return clusterService.operationRouting().searchShards(clusterState, request.indices(), concreteIndices, routingMap, "_local");
     }
 
     @Override
@@ -135,16 +135,16 @@ public class TransportValidateQueryAction extends TransportBroadcastOperationAct
                 shardFailures.add(new DefaultShardOperationFailedException((BroadcastShardOperationFailedException) shardResponse));
             } else {
                 ShardValidateQueryResponse validateQueryResponse = (ShardValidateQueryResponse) shardResponse;
-                valid = valid && validateQueryResponse.valid();
+                valid = valid && validateQueryResponse.isValid();
                 if (request.explain()) {
                     if (queryExplanations == null) {
                         queryExplanations = newArrayList();
                     }
                     queryExplanations.add(new QueryExplanation(
-                            validateQueryResponse.index(),
-                            validateQueryResponse.valid(),
-                            validateQueryResponse.explanation(),
-                            validateQueryResponse.error()
+                            validateQueryResponse.getIndex(),
+                            validateQueryResponse.isValid(),
+                            validateQueryResponse.getExplanation(),
+                            validateQueryResponse.getError()
                     ));
                 }
                 successfulShards++;
@@ -166,7 +166,7 @@ public class TransportValidateQueryAction extends TransportBroadcastOperationAct
             valid = true;
         } else {
             SearchContext.setCurrent(new SearchContext(0,
-                    new InternalSearchRequest().types(request.types()),
+                    new ShardSearchRequest().types(request.types()),
                     null, indexShard.searcher(), indexService, indexShard,
                     scriptService));
             try {

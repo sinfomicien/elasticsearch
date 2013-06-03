@@ -119,7 +119,7 @@ public abstract class TransportNodesOperationAction<Request extends NodesOperati
             this.request = request;
             this.listener = listener;
             clusterState = clusterService.state();
-            String[] nodesIds = clusterState.nodes().resolveNodes(request.nodesIds());
+            String[] nodesIds = clusterState.nodes().resolveNodesIds(request.nodesIds());
             this.nodesIds = filterNodeIds(clusterState.nodes(), nodesIds);
             this.responses = new AtomicReferenceArray<Object>(this.nodesIds.length);
         }
@@ -148,7 +148,7 @@ public abstract class TransportNodesOperationAction<Request extends NodesOperati
                         public void run() {
                             try {
                                 onOperation(nodeOperation(newNodeRequest(clusterState.nodes().localNodeId(), request)));
-                            } catch (Exception e) {
+                            } catch (Throwable e) {
                                 onFailure(clusterState.nodes().localNodeId(), e);
                             }
                         }
@@ -159,7 +159,7 @@ public abstract class TransportNodesOperationAction<Request extends NodesOperati
                         public void run() {
                             try {
                                 onOperation(nodeOperation(newNodeRequest(clusterState.nodes().masterNodeId(), request)));
-                            } catch (Exception e) {
+                            } catch (Throwable e) {
                                 onFailure(clusterState.nodes().masterNodeId(), e);
                             }
                         }
@@ -237,7 +237,7 @@ public abstract class TransportNodesOperationAction<Request extends NodesOperati
                     TransportResponseOptions options = TransportResponseOptions.options().withCompress(transportCompress());
                     try {
                         channel.sendResponse(response, options);
-                    } catch (Exception e) {
+                    } catch (Throwable e) {
                         onFailure(e);
                     }
                 }

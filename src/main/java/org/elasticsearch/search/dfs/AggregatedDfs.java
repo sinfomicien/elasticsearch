@@ -19,37 +19,39 @@
 
 package org.elasticsearch.search.dfs;
 
-import gnu.trove.impl.Constants;
-import gnu.trove.iterator.TObjectIntIterator;
-import gnu.trove.map.hash.TObjectIntHashMap;
+
+import java.io.IOException;
+import java.util.Map;
+
 import org.apache.lucene.index.Term;
+import org.apache.lucene.search.CollectionStatistics;
+import org.apache.lucene.search.TermStatistics;
+import org.elasticsearch.common.collect.XMaps;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Streamable;
-import org.elasticsearch.common.trove.ExtTObjectIntHasMap;
 
-import java.io.IOException;
-
-/**
- *
- */
 public class AggregatedDfs implements Streamable {
 
-    private TObjectIntHashMap<Term> dfMap;
-
+    private Map<Term, TermStatistics> termStatistics;
+    private Map<String, CollectionStatistics> fieldStatistics;
     private long maxDoc;
 
     private AggregatedDfs() {
-
     }
 
-    public AggregatedDfs(TObjectIntHashMap<Term> dfMap, long maxDoc) {
-        this.dfMap = dfMap;
+    public AggregatedDfs(Map<Term, TermStatistics> termStatistics, Map<String, CollectionStatistics> fieldStatistics, long maxDoc) {
+        this.termStatistics = termStatistics;
+        this.fieldStatistics = fieldStatistics;
         this.maxDoc = maxDoc;
     }
 
-    public TObjectIntHashMap<Term> dfMap() {
-        return dfMap;
+    public Map<Term, TermStatistics> termStatistics() {
+        return termStatistics;
+    }
+
+    public Map<String, CollectionStatistics> fieldStatistics() {
+        return fieldStatistics;
     }
 
     public long maxDoc() {
@@ -65,23 +67,31 @@ public class AggregatedDfs implements Streamable {
     @Override
     public void readFrom(StreamInput in) throws IOException {
         int size = in.readVInt();
-        dfMap = new ExtTObjectIntHasMap<Term>(size, Constants.DEFAULT_LOAD_FACTOR, -1);
+        termStatistics = XMaps.newMap(size);
         for (int i = 0; i < size; i++) {
-            dfMap.put(new Term(in.readUTF(), in.readUTF()), in.readVInt());
+            Term term = new Term(in.readString(), in.readBytesRef());
+            TermStatistics stats = new TermStatistics(in.readBytesRef(), 
+                    in.readVLong(), 
+                    DfsSearchResult.subOne(in.readVLong()));
+            termStatistics.put(term, stats);
         }
+        fieldStatistics = DfsSearchResult.readFieldStats(in);
         maxDoc = in.readVLong();
     }
 
     @Override
     public void writeTo(final StreamOutput out) throws IOException {
-        out.writeVInt(dfMap.size());
-
-        for (TObjectIntIterator<Term> it = dfMap.iterator(); it.hasNext(); ) {
-            it.advance();
-            out.writeUTF(it.key().field());
-            out.writeUTF(it.key().text());
-            out.writeVInt(it.value());
+        out.writeVInt(termStatistics.size());
+        for (Map.Entry<Term, TermStatistics> termTermStatisticsEntry : termStatistics.entrySet()) {
+            Term term = termTermStatisticsEntry.getKey();
+            out.writeString(term.field());
+            out.writeBytesRef(term.bytes());
+            TermStatistics stats = termTermStatisticsEntry.getValue();
+            out.writeBytesRef(stats.term());
+            out.writeVLong(stats.docFreq());
+            out.writeVLong(DfsSearchResult.addOne(stats.totalTermFreq()));
         }
+        DfsSearchResult.writeFieldStats(out, fieldStatistics);
         out.writeVLong(maxDoc);
     }
 }

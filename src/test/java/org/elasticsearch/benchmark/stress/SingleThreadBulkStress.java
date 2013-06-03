@@ -62,7 +62,8 @@ public class SingleThreadBulkStress {
             nodes[i] = nodeBuilder().settings(settingsBuilder().put(settings).put("name", "node" + i)).node();
         }
 
-        Node client = nodeBuilder().settings(settingsBuilder().put(settings).put("name", "client")).client(true).node();
+        //Node client = nodeBuilder().settings(settingsBuilder().put(settings).put("name", "client")).client(true).node();
+        Node client = nodes[0];
 
         Client client1 = client.client();
 
@@ -104,7 +105,7 @@ public class SingleThreadBulkStress {
         System.out.println("Indexing took " + stopWatch.totalTime() + ", TPS " + (((double) COUNT) / stopWatch.totalTime().secondsFrac()));
 
         client.client().admin().indices().prepareRefresh().execute().actionGet();
-        System.out.println("Count: " + client.client().prepareCount().setQuery(matchAllQuery()).execute().actionGet().count());
+        System.out.println("Count: " + client.client().prepareCount().setQuery(matchAllQuery()).execute().actionGet().getCount());
 
         client.close();
 

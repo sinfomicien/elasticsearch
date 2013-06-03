@@ -20,12 +20,16 @@
 package org.elasticsearch.index.mapper.internal;
 
 import org.apache.lucene.document.Field;
-import org.apache.lucene.document.Fieldable;
+import org.apache.lucene.document.FieldType;
+import org.elasticsearch.common.Explicit;
+import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Strings;
+import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.index.AlreadyExpiredException;
+import org.elasticsearch.index.codec.postingsformat.PostingsFormatProvider;
 import org.elasticsearch.index.mapper.*;
 import org.elasticsearch.index.mapper.core.LongFieldMapper;
 import org.elasticsearch.index.mapper.core.NumberFieldMapper;
@@ -46,25 +50,31 @@ public class TTLFieldMapper extends LongFieldMapper implements InternalMapper, R
 
     public static class Defaults extends LongFieldMapper.Defaults {
         public static final String NAME = TTLFieldMapper.CONTENT_TYPE;
-        public static final Field.Store STORE = Field.Store.YES;
-        public static final Field.Index INDEX = Field.Index.NOT_ANALYZED;
-        public static final boolean ENABLED = false;
+
+        public static final FieldType TTL_FIELD_TYPE = new FieldType(LongFieldMapper.Defaults.FIELD_TYPE);
+
+        static {
+            TTL_FIELD_TYPE.setStored(true);
+            TTL_FIELD_TYPE.setIndexed(true);
+            TTL_FIELD_TYPE.setTokenized(false);
+            TTL_FIELD_TYPE.freeze();
+        }
+
+        public static final EnabledAttributeMapper ENABLED_STATE = EnabledAttributeMapper.DISABLED;
         public static final long DEFAULT = -1;
     }
 
     public static class Builder extends NumberFieldMapper.Builder<Builder, TTLFieldMapper> {
 
-        private boolean enabled = Defaults.ENABLED;
+        private EnabledAttributeMapper enabledState = EnabledAttributeMapper.UNSET_DISABLED;
         private long defaultTTL = Defaults.DEFAULT;
 
         public Builder() {
-            super(Defaults.NAME);
-            store = Defaults.STORE;
-            index = Defaults.INDEX;
+            super(Defaults.NAME, new FieldType(Defaults.TTL_FIELD_TYPE));
         }
 
-        public Builder enabled(boolean enabled) {
-            this.enabled = enabled;
+        public Builder enabled(EnabledAttributeMapper enabled) {
+            this.enabledState = enabled;
             return builder;
         }
 
@@ -75,7 +85,7 @@ public class TTLFieldMapper extends LongFieldMapper implements InternalMapper, R
 
         @Override
         public TTLFieldMapper build(BuilderContext context) {
-            return new TTLFieldMapper(store, index, enabled, defaultTTL);
+            return new TTLFieldMapper(fieldType, enabledState, defaultTTL, ignoreMalformed(context), provider, fieldDataSettings);
         }
     }
 
@@ -88,7 +98,8 @@ public class TTLFieldMapper extends LongFieldMapper implements InternalMapper, R
                 String fieldName = Strings.toUnderscoreCase(entry.getKey());
                 Object fieldNode = entry.getValue();
                 if (fieldName.equals("enabled")) {
-                    builder.enabled(nodeBooleanValue(fieldNode));
+                    EnabledAttributeMapper enabledState = nodeBooleanValue(fieldNode) ? EnabledAttributeMapper.ENABLED : EnabledAttributeMapper.DISABLED;
+                    builder.enabled(enabledState);
                 } else if (fieldName.equals("default")) {
                     TimeValue ttlTimeValue = nodeTimeValue(fieldNode, null);
                     if (ttlTimeValue != null) {
@@ -100,23 +111,24 @@ public class TTLFieldMapper extends LongFieldMapper implements InternalMapper, R
         }
     }
 
-    private boolean enabled;
+    private EnabledAttributeMapper enabledState;
     private long defaultTTL;
 
     public TTLFieldMapper() {
-        this(Defaults.STORE, Defaults.INDEX, Defaults.ENABLED, Defaults.DEFAULT);
+        this(new FieldType(Defaults.TTL_FIELD_TYPE), Defaults.ENABLED_STATE, Defaults.DEFAULT, Defaults.IGNORE_MALFORMED, null, null);
     }
 
-    protected TTLFieldMapper(Field.Store store, Field.Index index, boolean enabled, long defaultTTL) {
+    protected TTLFieldMapper(FieldType fieldType, EnabledAttributeMapper enabled, long defaultTTL, Explicit<Boolean> ignoreMalformed,
+                             PostingsFormatProvider provider, @Nullable Settings fieldDataSettings) {
         super(new Names(Defaults.NAME, Defaults.NAME, Defaults.NAME, Defaults.NAME), Defaults.PRECISION_STEP,
-                Defaults.FUZZY_FACTOR, index, store, Defaults.BOOST, Defaults.OMIT_NORMS, Defaults.INDEX_OPTIONS,
-                Defaults.NULL_VALUE, Defaults.IGNORE_MALFORMED);
-        this.enabled = enabled;
+                Defaults.BOOST, fieldType, Defaults.NULL_VALUE, ignoreMalformed,
+                provider, null, fieldDataSettings);
+        this.enabledState = enabled;
         this.defaultTTL = defaultTTL;
     }
 
     public boolean enabled() {
-        return this.enabled;
+        return this.enabledState.enabled;
     }
 
     public long defaultTTL() {
@@ -125,7 +137,7 @@ public class TTLFieldMapper extends LongFieldMapper implements InternalMapper, R
 
     // Overrides valueForSearch to display live value of remaining ttl
     @Override
-    public Object valueForSearch(Fieldable field) {
+    public Object valueForSearch(Object value) {
         long now;
         SearchContext searchContext = SearchContext.current();
         if (searchContext != null) {
@@ -133,8 +145,8 @@ public class TTLFieldMapper extends LongFieldMapper implements InternalMapper, R
         } else {
             now = System.currentTimeMillis();
         }
-        long value = value(field);
-        return value - now;
+        long val = value(value);
+        return val - now;
     }
 
     // Other implementation for realtime get display
@@ -177,8 +189,8 @@ public class TTLFieldMapper extends LongFieldMapper implements InternalMapper, R
     }
 
     @Override
-    protected Fieldable innerParseCreateField(ParseContext context) throws IOException, AlreadyExpiredException {
-        if (enabled) {
+    protected Field innerParseCreateField(ParseContext context) throws IOException, AlreadyExpiredException {
+        if (enabledState.enabled && !context.sourceToParse().flyweight()) {
             long ttl = context.sourceToParse().ttl();
             if (ttl <= 0 && defaultTTL > 0) { // no ttl provided so we use the default value
                 ttl = defaultTTL;
@@ -193,7 +205,7 @@ public class TTLFieldMapper extends LongFieldMapper implements InternalMapper, R
                     throw new AlreadyExpiredException(context.index(), context.type(), context.id(), timestamp, ttl, now);
                 }
                 // the expiration timestamp (timestamp + ttl) is set as field
-                return new CustomLongNumericField(this, expire);
+                return new CustomLongNumericField(this, expire, fieldType);
             }
         }
         return null;
@@ -202,14 +214,14 @@ public class TTLFieldMapper extends LongFieldMapper implements InternalMapper, R
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
         // if all are defaults, no sense to write it at all
-        if (enabled == Defaults.ENABLED && defaultTTL == Defaults.DEFAULT) {
+        if (enabledState == Defaults.ENABLED_STATE && defaultTTL == Defaults.DEFAULT) {
             return builder;
         }
         builder.startObject(CONTENT_TYPE);
-        if (enabled != Defaults.ENABLED) {
-            builder.field("enabled", enabled);
+        if (enabledState != Defaults.ENABLED_STATE) {
+            builder.field("enabled", enabledState.enabled);
         }
-        if (defaultTTL != Defaults.DEFAULT) {
+        if (defaultTTL != Defaults.DEFAULT && enabledState.enabled) {
             builder.field("default", defaultTTL);
         }
         builder.endObject();
@@ -222,6 +234,9 @@ public class TTLFieldMapper extends LongFieldMapper implements InternalMapper, R
         if (!mergeContext.mergeFlags().simulate()) {
             if (ttlMergeWith.defaultTTL != -1) {
                 this.defaultTTL = ttlMergeWith.defaultTTL;
+            }
+            if (ttlMergeWith.enabledState != enabledState && !ttlMergeWith.enabledState.unset()) {
+                this.enabledState = ttlMergeWith.enabledState;
             }
         }
     }

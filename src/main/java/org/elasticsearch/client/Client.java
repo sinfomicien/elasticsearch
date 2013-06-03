@@ -32,6 +32,9 @@ import org.elasticsearch.action.delete.DeleteResponse;
 import org.elasticsearch.action.deletebyquery.DeleteByQueryRequest;
 import org.elasticsearch.action.deletebyquery.DeleteByQueryRequestBuilder;
 import org.elasticsearch.action.deletebyquery.DeleteByQueryResponse;
+import org.elasticsearch.action.explain.ExplainRequest;
+import org.elasticsearch.action.explain.ExplainRequestBuilder;
+import org.elasticsearch.action.explain.ExplainResponse;
 import org.elasticsearch.action.get.*;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexRequestBuilder;
@@ -42,6 +45,9 @@ import org.elasticsearch.action.percolate.PercolateRequest;
 import org.elasticsearch.action.percolate.PercolateRequestBuilder;
 import org.elasticsearch.action.percolate.PercolateResponse;
 import org.elasticsearch.action.search.*;
+import org.elasticsearch.action.suggest.SuggestRequest;
+import org.elasticsearch.action.suggest.SuggestRequestBuilder;
+import org.elasticsearch.action.suggest.SuggestResponse;
 import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.action.update.UpdateRequestBuilder;
 import org.elasticsearch.action.update.UpdateResponse;
@@ -82,7 +88,7 @@ public interface Client {
      * @param <RequestBuilder> The request builder type.
      * @return A future allowing to get back the response.
      */
-    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response>> ActionFuture<Response> execute(final Action<Request, Response, RequestBuilder> action, final Request request);
+    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response, RequestBuilder>> ActionFuture<Response> execute(final Action<Request, Response, RequestBuilder> action, final Request request);
 
     /**
      * Executes a generic action, denoted by an {@link Action}.
@@ -94,7 +100,7 @@ public interface Client {
      * @param <Response>       The response type.
      * @param <RequestBuilder> The request builder type.
      */
-    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response>> void execute(final Action<Request, Response, RequestBuilder> action, final Request request, ActionListener<Response> listener);
+    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response, RequestBuilder>> void execute(final Action<Request, Response, RequestBuilder> action, final Request request, ActionListener<Response> listener);
 
     /**
      * Prepares a request builder to execute, specified by {@link Action}.
@@ -105,7 +111,7 @@ public interface Client {
      * @param <RequestBuilder> The request builder.
      * @return The request builder, that can, at a later stage, execute the request.
      */
-    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response>> RequestBuilder prepareExecute(final Action<Request, Response, RequestBuilder> action);
+    <Request extends ActionRequest, Response extends ActionResponse, RequestBuilder extends ActionRequestBuilder<Request, Response, RequestBuilder>> RequestBuilder prepareExecute(final Action<Request, Response, RequestBuilder> action);
 
 
     /**
@@ -329,6 +335,29 @@ public interface Client {
     CountRequestBuilder prepareCount(String... indices);
 
     /**
+     * Suggestion matching a specific phrase.
+     *
+     * @param request The suggest request
+     * @return The result future
+     * @see Requests#suggestRequest(String...)
+     */
+    ActionFuture<SuggestResponse> suggest(SuggestRequest request);
+
+    /**
+     * Suggestions matching a specific phrase.
+     *
+     * @param request  The suggest request
+     * @param listener A listener to be notified of the result
+     * @see Requests#suggestRequest(String...)
+     */
+    void suggest(SuggestRequest request, ActionListener<SuggestResponse> listener);
+
+    /**
+     * Suggestions matching a specific phrase.
+     */
+    SuggestRequestBuilder prepareSuggest(String... indices);
+
+    /**
      * Search across one or more indices and one or more types with a query.
      *
      * @param request The search request
@@ -431,4 +460,29 @@ public interface Client {
      * @param type  The type of the doc
      */
     PercolateRequestBuilder preparePercolate(String index, String type);
+
+    /**
+     * Computes a score explanation for the specified request.
+     *
+     * @param index The index this explain is targeted for
+     * @param type  The type this explain is targeted for
+     * @param id    The document identifier this explain is targeted for
+     */
+    ExplainRequestBuilder prepareExplain(String index, String type, String id);
+
+    /**
+     * Computes a score explanation for the specified request.
+     *
+     * @param request The request encapsulating the query and document identifier to compute a score explanation for
+     */
+    ActionFuture<ExplainResponse> explain(ExplainRequest request);
+
+    /**
+     * Computes a score explanation for the specified request.
+     *
+     * @param request  The request encapsulating the query and document identifier to compute a score explanation for
+     * @param listener A listener to be notified of the result
+     */
+    void explain(ExplainRequest request, ActionListener<ExplainResponse> listener);
+
 }

@@ -19,12 +19,14 @@
 
 package org.elasticsearch.index.query;
 
-import org.apache.lucene.search.FilteredQuery;
 import org.apache.lucene.search.Query;
+import org.elasticsearch.ElasticSearchIllegalStateException;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.inject.Inject;
+import org.elasticsearch.common.lucene.search.XFilteredQuery;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.index.mapper.DocumentMapper;
+import org.elasticsearch.index.search.child.ScoreType;
 import org.elasticsearch.index.search.child.TopChildrenQuery;
 import org.elasticsearch.search.internal.SearchContext;
 
@@ -54,8 +56,7 @@ public class TopChildrenQueryParser implements QueryParser {
         boolean queryFound = false;
         float boost = 1.0f;
         String childType = null;
-        String scope = null;
-        TopChildrenQuery.ScoreType scoreType = TopChildrenQuery.ScoreType.MAX;
+        ScoreType scoreType = ScoreType.MAX;
         int factor = 5;
         int incrementalFactor = 2;
 
@@ -82,9 +83,11 @@ public class TopChildrenQueryParser implements QueryParser {
                 if ("type".equals(currentFieldName)) {
                     childType = parser.text();
                 } else if ("_scope".equals(currentFieldName)) {
-                    scope = parser.text();
+                    throw new QueryParsingException(parseContext.index(), "the [_scope] support in [top_children] query has been removed, use a filter as a facet_filter in the relevant global facet");
                 } else if ("score".equals(currentFieldName)) {
-                    scoreType = TopChildrenQuery.ScoreType.fromString(parser.text());
+                    scoreType = ScoreType.fromString(parser.text());
+                } else if ("score_mode".equals(currentFieldName) || "scoreMode".equals(currentFieldName)) {
+                    scoreType = ScoreType.fromString(parser.text());
                 } else if ("boost".equals(currentFieldName)) {
                     boost = parser.floatValue();
                 } else if ("factor".equals(currentFieldName)) {
@@ -97,10 +100,10 @@ public class TopChildrenQueryParser implements QueryParser {
             }
         }
         if (!queryFound) {
-            throw new QueryParsingException(parseContext.index(), "[child] requires 'query' field");
+            throw new QueryParsingException(parseContext.index(), "[top_children] requires 'query' field");
         }
         if (childType == null) {
-            throw new QueryParsingException(parseContext.index(), "[child] requires 'type' field");
+            throw new QueryParsingException(parseContext.index(), "[top_children] requires 'type' field");
         }
 
         if (query == null) {
@@ -118,11 +121,14 @@ public class TopChildrenQueryParser implements QueryParser {
 
         query.setBoost(boost);
         // wrap the query with type query
-        query = new FilteredQuery(query, parseContext.cacheFilter(childDocMapper.typeFilter(), null));
+        query = new XFilteredQuery(query, parseContext.cacheFilter(childDocMapper.typeFilter(), null));
 
         SearchContext searchContext = SearchContext.current();
-        TopChildrenQuery childQuery = new TopChildrenQuery(query, scope, childType, parentType, scoreType, factor, incrementalFactor);
-        searchContext.addScopePhase(childQuery);
+        if (searchContext == null) {
+            throw new ElasticSearchIllegalStateException("[top_children] Can't execute, search context not set.");
+        }
+        TopChildrenQuery childQuery = new TopChildrenQuery(searchContext, query, childType, parentType, scoreType, factor, incrementalFactor);
+        searchContext.addRewrite(childQuery);
         return childQuery;
     }
 }

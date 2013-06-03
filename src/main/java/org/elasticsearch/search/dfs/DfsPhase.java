@@ -21,8 +21,12 @@ package org.elasticsearch.search.dfs;
 
 import com.google.common.collect.ImmutableMap;
 import gnu.trove.set.hash.THashSet;
+import org.apache.lucene.index.IndexReaderContext;
 import org.apache.lucene.index.Term;
-import org.elasticsearch.common.util.concurrent.ThreadLocals;
+import org.apache.lucene.index.TermContext;
+import org.apache.lucene.search.CollectionStatistics;
+import org.apache.lucene.search.TermStatistics;
+import org.elasticsearch.common.collect.XMaps;
 import org.elasticsearch.search.SearchParseElement;
 import org.elasticsearch.search.SearchPhase;
 import org.elasticsearch.search.internal.SearchContext;
@@ -34,10 +38,10 @@ import java.util.Map;
  */
 public class DfsPhase implements SearchPhase {
 
-    private static ThreadLocal<ThreadLocals.CleanableValue<THashSet<Term>>> cachedTermsSet = new ThreadLocal<ThreadLocals.CleanableValue<THashSet<Term>>>() {
+    private static ThreadLocal<THashSet<Term>> cachedTermsSet = new ThreadLocal<THashSet<Term>>() {
         @Override
-        protected ThreadLocals.CleanableValue<THashSet<Term>> initialValue() {
-            return new ThreadLocals.CleanableValue<THashSet<Term>>(new THashSet<Term>());
+        protected THashSet<Term> initialValue() {
+            return new THashSet<Term>();
         }
     };
 
@@ -51,21 +55,48 @@ public class DfsPhase implements SearchPhase {
     }
 
     public void execute(SearchContext context) {
+        THashSet<Term> termsSet = null;
         try {
             if (!context.queryRewritten()) {
                 context.updateRewriteQuery(context.searcher().rewrite(context.query()));
             }
 
-            THashSet<Term> termsSet = cachedTermsSet.get().get();
-            termsSet.clear();
+            termsSet = cachedTermsSet.get();
+            if (!termsSet.isEmpty()) {
+                termsSet.clear();
+            }
             context.query().extractTerms(termsSet);
-            Term[] terms = termsSet.toArray(new Term[termsSet.size()]);
-            int[] freqs = context.searcher().docFreqs(terms);
+            if (context.rescore() != null) {
+                context.rescore().rescorer().extractTerms(context, context.rescore(), termsSet);
+            }
 
-            context.dfsResult().termsAndFreqs(terms, freqs);
-            context.dfsResult().maxDoc(context.searcher().getIndexReader().maxDoc());
+            Term[] terms = termsSet.toArray(new Term[termsSet.size()]);
+            TermStatistics[] termStatistics = new TermStatistics[terms.length];
+            IndexReaderContext indexReaderContext = context.searcher().getTopReaderContext();
+            for (int i = 0; i < terms.length; i++) {
+                // LUCENE 4 UPGRADE: cache TermContext?
+                TermContext termContext = TermContext.build(indexReaderContext, terms[i], false);
+                termStatistics[i] = context.searcher().termStatistics(terms[i], termContext);
+            }
+
+            Map<String, CollectionStatistics> fieldStatistics = XMaps.newNoNullKeysMap();
+            for (Term term : terms) {
+                assert term.field() != null : "field is null";
+                if (!fieldStatistics.containsKey(term.field())) {
+                    final CollectionStatistics collectionStatistics = context.searcher().collectionStatistics(term.field());
+                    fieldStatistics.put(term.field(), collectionStatistics);
+                }
+            }
+
+            context.dfsResult().termsStatistics(terms, termStatistics)
+                    .fieldStatistics(fieldStatistics)
+                    .maxDoc(context.searcher().getIndexReader().maxDoc());
         } catch (Exception e) {
-            throw new DfsPhaseExecutionException(context, "", e);
+            throw new DfsPhaseExecutionException(context, "Exception during dfs phase", e);
+        } finally {
+            if (termsSet != null) {
+                termsSet.clear(); // don't hold on to terms
+            }
         }
     }
 }

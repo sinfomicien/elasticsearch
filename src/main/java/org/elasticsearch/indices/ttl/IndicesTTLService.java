@@ -19,8 +19,8 @@
 
 package org.elasticsearch.indices.ttl;
 
-import org.apache.lucene.document.Document;
-import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.AtomicReaderContext;
+import org.apache.lucene.index.Term;
 import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.NumericRangeQuery;
 import org.apache.lucene.search.Query;
@@ -36,24 +36,25 @@ import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.cluster.metadata.MetaData;
 import org.elasticsearch.common.component.AbstractLifecycleComponent;
 import org.elasticsearch.common.inject.Inject;
-import org.elasticsearch.common.lucene.uid.UidField;
+import org.elasticsearch.common.lucene.uid.Versions;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.index.engine.Engine;
+import org.elasticsearch.index.fieldvisitor.UidAndRoutingFieldsVisitor;
 import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.index.mapper.FieldMappers;
+import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.mapper.Uid;
-import org.elasticsearch.index.mapper.internal.RoutingFieldMapper;
 import org.elasticsearch.index.mapper.internal.TTLFieldMapper;
 import org.elasticsearch.index.mapper.internal.UidFieldMapper;
-import org.elasticsearch.index.mapper.selector.UidAndRoutingFieldSelector;
 import org.elasticsearch.index.service.IndexService;
 import org.elasticsearch.index.shard.IndexShardState;
 import org.elasticsearch.index.shard.service.IndexShard;
 import org.elasticsearch.indices.IndicesService;
 import org.elasticsearch.node.settings.NodeSettingsService;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -63,15 +64,8 @@ import java.util.List;
  */
 public class IndicesTTLService extends AbstractLifecycleComponent<IndicesTTLService> {
 
-    static {
-        MetaData.addDynamicSettings(
-                "indices.ttl.interval"
-        );
-
-        IndexMetaData.addDynamicSettings(
-                "index.ttl.disable_purge"
-        );
-    }
+    public static final String INDICES_TTL_INTERVAL = "indices.ttl.interval";
+    public static final String INDEX_TTL_DISABLE_PURGE = "index.ttl.disable_purge";
 
     private final ClusterService clusterService;
     private final IndicesService indicesService;
@@ -152,7 +146,7 @@ public class IndicesTTLService extends AbstractLifecycleComponent<IndicesTTLServ
                 if (indexMetaData == null) {
                     continue;
                 }
-                boolean disablePurge = indexMetaData.settings().getAsBoolean("index.ttl.disable_purge", false);
+                boolean disablePurge = indexMetaData.settings().getAsBoolean(INDEX_TTL_DISABLE_PURGE, false);
                 if (disablePurge) {
                     continue;
                 }
@@ -188,7 +182,7 @@ public class IndicesTTLService extends AbstractLifecycleComponent<IndicesTTLServ
             Engine.Searcher searcher = shardToPurge.searcher();
             try {
                 logger.debug("[{}][{}] purging shard", shardToPurge.routingEntry().index(), shardToPurge.routingEntry().id());
-                ExpiredDocsCollector expiredDocsCollector = new ExpiredDocsCollector();
+                ExpiredDocsCollector expiredDocsCollector = new ExpiredDocsCollector(shardToPurge.routingEntry().index());
                 searcher.searcher().search(query, expiredDocsCollector);
                 List<DocToPurge> docsToPurge = expiredDocsCollector.getDocsToPurge();
                 BulkRequestBuilder bulkRequest = client.prepareBulk();
@@ -220,10 +214,12 @@ public class IndicesTTLService extends AbstractLifecycleComponent<IndicesTTLServ
     }
 
     private class ExpiredDocsCollector extends Collector {
-        private IndexReader indexReader;
+        private final MapperService mapperService;
+        private AtomicReaderContext context;
         private List<DocToPurge> docsToPurge = new ArrayList<DocToPurge>();
 
-        public ExpiredDocsCollector() {
+        public ExpiredDocsCollector(String index) {
+            mapperService = indicesService.indexService(index).mapperService();
         }
 
         public void setScorer(Scorer scorer) {
@@ -235,17 +231,18 @@ public class IndicesTTLService extends AbstractLifecycleComponent<IndicesTTLServ
 
         public void collect(int doc) {
             try {
-                Document document = indexReader.document(doc, new UidAndRoutingFieldSelector());
-                String uid = document.getFieldable(UidFieldMapper.NAME).stringValue();
-                long version = UidField.loadVersion(indexReader, UidFieldMapper.TERM_FACTORY.createTerm(uid));
-                docsToPurge.add(new DocToPurge(Uid.typeFromUid(uid), Uid.idFromUid(uid), version, document.get(RoutingFieldMapper.NAME)));
+                UidAndRoutingFieldsVisitor fieldsVisitor = new UidAndRoutingFieldsVisitor();
+                context.reader().document(doc, fieldsVisitor);
+                Uid uid = fieldsVisitor.uid();
+                final long version = Versions.loadVersion(context.reader(), new Term(UidFieldMapper.NAME, uid.toBytesRef()));
+                docsToPurge.add(new DocToPurge(uid.type(), uid.id(), version, fieldsVisitor.routing()));
             } catch (Exception e) {
                 logger.trace("failed to collect doc", e);
             }
         }
 
-        public void setNextReader(IndexReader reader, int docBase) {
-            this.indexReader = reader;
+        public void setNextReader(AtomicReaderContext context) throws IOException {
+            this.context = context;
         }
 
         public List<DocToPurge> getDocsToPurge() {
@@ -278,7 +275,7 @@ public class IndicesTTLService extends AbstractLifecycleComponent<IndicesTTLServ
     class ApplySettings implements NodeSettingsService.Listener {
         @Override
         public void onRefreshSettings(Settings settings) {
-            TimeValue interval = settings.getAsTime("indices.ttl.interval", IndicesTTLService.this.interval);
+            TimeValue interval = settings.getAsTime(INDICES_TTL_INTERVAL, IndicesTTLService.this.interval);
             if (!interval.equals(IndicesTTLService.this.interval)) {
                 logger.info("updating indices.ttl.interval from [{}] to [{}]", IndicesTTLService.this.interval, interval);
                 IndicesTTLService.this.interval = interval;

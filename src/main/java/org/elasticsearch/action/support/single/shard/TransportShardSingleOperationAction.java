@@ -34,7 +34,6 @@ import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.*;
@@ -125,17 +124,17 @@ public abstract class TransportShardSingleOperationAction<Request extends Single
             perform(null);
         }
 
-        private void onFailure(ShardRouting shardRouting, Exception e) {
+        private void onFailure(ShardRouting shardRouting, Throwable e) {
             if (logger.isTraceEnabled() && e != null) {
                 logger.trace("{}: failed to execute [{}]", e, shardRouting, request);
             }
             perform(e);
         }
 
-        private void perform(@Nullable final Exception lastException) {
+        private void perform(@Nullable final Throwable lastException) {
             final ShardRouting shardRouting = shardIt.nextOrNull();
             if (shardRouting == null) {
-                Exception failure = lastException;
+                Throwable failure = lastException;
                 if (failure == null) {
                     failure = new NoShardAvailableActionException(shardIt.shardId(), "No shard available for [" + request + "]");
                 } else {
@@ -149,13 +148,14 @@ public abstract class TransportShardSingleOperationAction<Request extends Single
 
             if (shardRouting.currentNodeId().equals(nodes.localNodeId())) {
                 if (request.operationThreaded()) {
+                    request.beforeLocalFork();
                     threadPool.executor(executor).execute(new Runnable() {
                         @Override
                         public void run() {
                             try {
                                 Response response = shardOperation(request, shardRouting.id());
                                 listener.onResponse(response);
-                            } catch (Exception e) {
+                            } catch (Throwable e) {
                                 onFailure(shardRouting, e);
                             }
                         }
@@ -164,7 +164,7 @@ public abstract class TransportShardSingleOperationAction<Request extends Single
                     try {
                         final Response response = shardOperation(request, shardRouting.id());
                         listener.onResponse(response);
-                    } catch (Exception e) {
+                    } catch (Throwable e) {
                         onFailure(shardRouting, e);
                     }
                 }
@@ -219,7 +219,7 @@ public abstract class TransportShardSingleOperationAction<Request extends Single
                 public void onResponse(Response result) {
                     try {
                         channel.sendResponse(result);
-                    } catch (Exception e) {
+                    } catch (Throwable e) {
                         onFailure(e);
                     }
                 }
@@ -255,7 +255,7 @@ public abstract class TransportShardSingleOperationAction<Request extends Single
         }
     }
 
-    protected class ShardSingleOperationRequest implements Streamable {
+    class ShardSingleOperationRequest extends TransportRequest {
 
         private Request request;
 
@@ -265,6 +265,7 @@ public abstract class TransportShardSingleOperationAction<Request extends Single
         }
 
         public ShardSingleOperationRequest(Request request, int shardId) {
+            super(request);
             this.request = request;
             this.shardId = shardId;
         }
@@ -279,6 +280,7 @@ public abstract class TransportShardSingleOperationAction<Request extends Single
 
         @Override
         public void readFrom(StreamInput in) throws IOException {
+            super.readFrom(in);
             request = newRequest();
             request.readFrom(in);
             shardId = in.readVInt();
@@ -286,6 +288,7 @@ public abstract class TransportShardSingleOperationAction<Request extends Single
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
+            super.writeTo(out);
             request.writeTo(out);
             out.writeVInt(shardId);
         }

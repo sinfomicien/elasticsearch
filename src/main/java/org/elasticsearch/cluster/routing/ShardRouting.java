@@ -22,6 +22,7 @@ package org.elasticsearch.cluster.routing;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Streamable;
+import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.index.shard.ShardId;
 
 import java.io.IOException;
@@ -29,10 +30,8 @@ import java.io.Serializable;
 
 /**
  * Shard routing represents the state of a shard instance allocated in the cluster.
- *
- *
  */
-public interface ShardRouting extends Streamable, Serializable {
+public interface ShardRouting extends Streamable, Serializable, ToXContent {
 
     /**
      * The shard id.
@@ -86,22 +85,29 @@ public interface ShardRouting extends Streamable, Serializable {
     boolean started();
 
     /**
-     * The shard is in relocating mode.
+     * Returns <code>true</code> iff the this shard is currently relocating to
+     * another node. Otherwise <code>false</code>
+     * 
+     * @see ShardRoutingState#RELOCATING
      */
     boolean relocating();
 
     /**
-     * Relocating or started.
+     * Returns <code>true</code> iff the this shard is currently
+     * {@link ShardRoutingState#STARTED started} or
+     * {@link ShardRoutingState#RELOCATING relocating} to another node.
+     * Otherwise <code>false</code>
      */
     boolean active();
 
     /**
-     * The shard is assigned to a node.
+     * Returns <code>true</code> iff this shard is assigned to a node ie. not
+     * {@link ShardRoutingState#UNASSIGNED unassigned}. Otherwise <code>false</code>
      */
     boolean assignedToNode();
 
     /**
-     * The current node id the shard is allocated to.
+     * The current node id the shard is allocated on.
      */
     String currentNodeId();
 
@@ -111,7 +117,7 @@ public interface ShardRouting extends Streamable, Serializable {
     String relocatingNodeId();
 
     /**
-     * Is this a primary shard.
+     * Returns <code>true</code> iff this shard is a primary.
      */
     boolean primary();
 

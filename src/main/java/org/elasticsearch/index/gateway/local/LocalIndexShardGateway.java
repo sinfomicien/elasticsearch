@@ -19,10 +19,9 @@
 
 package org.elasticsearch.index.gateway.local;
 
-import com.google.common.io.Closeables;
-import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.index.SegmentInfos;
 import org.elasticsearch.ElasticSearchException;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.io.stream.InputStreamStreamInput;
@@ -49,7 +48,7 @@ import java.io.EOFException;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.util.Map;
+import java.util.Arrays;
 import java.util.concurrent.ScheduledFuture;
 
 /**
@@ -101,12 +100,25 @@ public class LocalIndexShardGateway extends AbstractIndexShardComponent implemen
         long version = -1;
         long translogId = -1;
         try {
-            if (IndexReader.indexExists(indexShard.store().directory())) {
+            SegmentInfos si = null;
+            try {
+                si = Lucene.readSegmentInfos(indexShard.store().directory());
+            } catch (Exception e) {
+                String files = "_unknown_";
+                try {
+                    files = Arrays.toString(indexShard.store().directory().listAll());
+                } catch (Exception e1) {
+                    // ignore
+                }
+                if (indexShouldExists && indexShard.store().indexStore().persistent()) {
+                    throw new IndexShardGatewayRecoveryException(shardId(), "shard allocated for local recovery (post api), should exist, but doesn't, current files: " + files, e);
+                }
+            }
+            if (si != null) {
                 if (indexShouldExists) {
-                    version = IndexReader.getCurrentVersion(indexShard.store().directory());
-                    Map<String, String> commitUserData = IndexReader.getCommitUserData(indexShard.store().directory());
-                    if (commitUserData.containsKey(Translog.TRANSLOG_ID_KEY)) {
-                        translogId = Long.parseLong(commitUserData.get(Translog.TRANSLOG_ID_KEY));
+                    version = si.getVersion();
+                    if (si.getUserData().containsKey(Translog.TRANSLOG_ID_KEY)) {
+                        translogId = Long.parseLong(si.getUserData().get(Translog.TRANSLOG_ID_KEY));
                     } else {
                         translogId = version;
                     }
@@ -118,8 +130,6 @@ public class LocalIndexShardGateway extends AbstractIndexShardComponent implemen
                     IndexWriter writer = new IndexWriter(indexShard.store().directory(), new IndexWriterConfig(Lucene.VERSION, Lucene.STANDARD_ANALYZER).setOpenMode(IndexWriterConfig.OpenMode.CREATE));
                     writer.close();
                 }
-            } else if (indexShouldExists && indexShard.store().indexStore().persistent()) {
-                throw new IndexShardGatewayRecoveryException(shardId(), "shard allocated for local recovery (post api), should exists, but doesn't");
             }
         } catch (IOException e) {
             throw new IndexShardGatewayRecoveryException(shardId(), "Failed to fetch index version after copying it over", e);
@@ -223,10 +233,14 @@ public class LocalIndexShardGateway extends AbstractIndexShardComponent implemen
             }
         } catch (Throwable e) {
             // we failed to recovery, make sure to delete the translog file (and keep the recovering one)
-            indexShard.translog().close(true);
+            indexShard.translog().closeWithDelete();
             throw new IndexShardGatewayRecoveryException(shardId, "failed to recover shard", e);
         } finally {
-            Closeables.closeQuietly(fs);
+            try {
+                fs.close();
+            } catch (IOException e) {
+                // ignore
+            }
         }
         indexShard.performRecoveryFinalization(true);
 
@@ -266,7 +280,7 @@ public class LocalIndexShardGateway extends AbstractIndexShardComponent implemen
     }
 
     @Override
-    public void close(boolean delete) {
+    public void close() {
         if (flushScheduler != null) {
             flushScheduler.cancel(false);
         }

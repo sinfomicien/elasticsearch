@@ -20,27 +20,19 @@
 package org.elasticsearch.action.count;
 
 import org.elasticsearch.action.ActionListener;
-import org.elasticsearch.action.support.BaseRequestBuilder;
-import org.elasticsearch.action.support.broadcast.BroadcastOperationThreading;
+import org.elasticsearch.action.support.broadcast.BroadcastOperationRequestBuilder;
 import org.elasticsearch.client.Client;
+import org.elasticsearch.client.internal.InternalClient;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.index.query.QueryBuilder;
 
 /**
  * A count action request builder.
  */
-public class CountRequestBuilder extends BaseRequestBuilder<CountRequest, CountResponse> {
+public class CountRequestBuilder extends BroadcastOperationRequestBuilder<CountRequest, CountResponse, CountRequestBuilder> {
 
     public CountRequestBuilder(Client client) {
-        super(client, new CountRequest());
-    }
-
-    /**
-     * Sets the indices the count query will run against.
-     */
-    public CountRequestBuilder setIndices(String... indices) {
-        request.indices(indices);
-        return this;
+        super((InternalClient) client, new CountRequest());
     }
 
     /**
@@ -61,18 +53,21 @@ public class CountRequestBuilder extends BaseRequestBuilder<CountRequest, CountR
     }
 
     /**
-     * A query hint to optionally later be used when routing the request.
-     */
-    public CountRequestBuilder setQueryHint(String queryHint) {
-        request.queryHint(queryHint);
-        return this;
-    }
-
-    /**
      * A comma separated list of routing values to control the shards the search will be executed on.
      */
     public CountRequestBuilder setRouting(String routing) {
         request.routing(routing);
+        return this;
+    }
+
+    /**
+     * Sets the preference to execute the search. Defaults to randomize across shards. Can be set to
+     * <tt>_local</tt> to prefer local shards, <tt>_primary</tt> to execute only on primary shards,
+     * _shards:x,y to operate on shards x & y, or a custom value, which guarantees that the same order
+     * will be used across different requests.
+     */
+    public CountRequestBuilder setPreference(String preference) {
+        request.preference(preference);
         return this;
     }
 
@@ -124,24 +119,8 @@ public class CountRequestBuilder extends BaseRequestBuilder<CountRequest, CountR
         return this;
     }
 
-    /**
-     * Controls the operation threading model.
-     */
-    public CountRequestBuilder setOperationThreading(BroadcastOperationThreading operationThreading) {
-        request.operationThreading(operationThreading);
-        return this;
-    }
-
-    /**
-     * Should the listener be called on a separate thread if needed.
-     */
-    public CountRequestBuilder setListenerThreaded(boolean threadedListener) {
-        request.listenerThreaded(threadedListener);
-        return this;
-    }
-
     @Override
     protected void doExecute(ActionListener<CountResponse> listener) {
-        client.count(request, listener);
+        ((InternalClient) client).count(request, listener);
     }
 }

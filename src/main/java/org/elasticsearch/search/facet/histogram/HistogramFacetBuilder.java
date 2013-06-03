@@ -22,23 +22,19 @@ package org.elasticsearch.search.facet.histogram;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.index.query.FilterBuilder;
 import org.elasticsearch.search.builder.SearchSourceBuilderException;
-import org.elasticsearch.search.facet.AbstractFacetBuilder;
+import org.elasticsearch.search.facet.FacetBuilder;
 
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
 /**
  * A facet builder of histogram facets.
- *
- *
  */
-public class HistogramFacetBuilder extends AbstractFacetBuilder {
+public class HistogramFacetBuilder extends FacetBuilder {
     private String keyFieldName;
     private String valueFieldName;
     private long interval = -1;
     private HistogramFacet.ComparatorType comparatorType;
-    private Object from;
-    private Object to;
 
     /**
      * Constructs a new histogram facet with the provided facet logical name.
@@ -92,16 +88,6 @@ public class HistogramFacetBuilder extends AbstractFacetBuilder {
         return interval(unit.toMillis(interval));
     }
 
-    /**
-     * Sets the bounds from and to for the facet. Both performs bounds check and includes only
-     * values within the bounds, and improves performance.
-     */
-    public HistogramFacetBuilder bounds(Object from, Object to) {
-        this.from = from;
-        this.to = to;
-        return this;
-    }
-
     public HistogramFacetBuilder comparator(HistogramFacet.ComparatorType comparatorType) {
         this.comparatorType = comparatorType;
         return this;
@@ -113,15 +99,6 @@ public class HistogramFacetBuilder extends AbstractFacetBuilder {
      */
     public HistogramFacetBuilder global(boolean global) {
         super.global(global);
-        return this;
-    }
-
-    /**
-     * Marks the facet to run in a specific scope.
-     */
-    @Override
-    public HistogramFacetBuilder scope(String scope) {
-        super.scope(scope);
         return this;
     }
 
@@ -160,11 +137,6 @@ public class HistogramFacetBuilder extends AbstractFacetBuilder {
             builder.field("field", keyFieldName);
         }
         builder.field("interval", interval);
-
-        if (from != null && to != null) {
-            builder.field("from", from);
-            builder.field("to", to);
-        }
 
         if (comparatorType != null) {
             builder.field("comparator", comparatorType.description());

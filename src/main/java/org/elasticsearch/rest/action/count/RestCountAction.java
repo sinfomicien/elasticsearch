@@ -22,6 +22,7 @@ package org.elasticsearch.rest.action.count;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.count.CountRequest;
 import org.elasticsearch.action.count.CountResponse;
+import org.elasticsearch.action.support.IgnoreIndices;
 import org.elasticsearch.action.support.broadcast.BroadcastOperationThreading;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.common.bytes.BytesReference;
@@ -61,6 +62,9 @@ public class RestCountAction extends BaseRestHandler {
     @Override
     public void handleRequest(final RestRequest request, final RestChannel channel) {
         CountRequest countRequest = new CountRequest(RestActions.splitIndices(request.param("index")));
+        if (request.hasParam("ignore_indices")) {
+            countRequest.ignoreIndices(IgnoreIndices.fromString(request.param("ignore_indices")));
+        }
         countRequest.listenerThreaded(false);
         try {
             BroadcastOperationThreading operationThreading = BroadcastOperationThreading.fromString(request.param("operation_threading"), BroadcastOperationThreading.SINGLE_THREAD);
@@ -82,10 +86,10 @@ public class RestCountAction extends BaseRestHandler {
                     }
                 }
             }
-            countRequest.queryHint(request.param("query_hint"));
             countRequest.routing(request.param("routing"));
             countRequest.minScore(request.paramAsFloat("min_score", DEFAULT_MIN_SCORE));
             countRequest.types(splitTypes(request.param("type")));
+            countRequest.preference(request.param("preference"));
         } catch (Exception e) {
             try {
                 XContentBuilder builder = RestXContentBuilder.restContentBuilder(request);
@@ -102,13 +106,13 @@ public class RestCountAction extends BaseRestHandler {
                 try {
                     XContentBuilder builder = RestXContentBuilder.restContentBuilder(request);
                     builder.startObject();
-                    builder.field("count", response.count());
+                    builder.field("count", response.getCount());
 
                     buildBroadcastShardsHeader(builder, response);
 
                     builder.endObject();
                     channel.sendResponse(new XContentRestResponse(request, OK, builder));
-                } catch (Exception e) {
+                } catch (Throwable e) {
                     onFailure(e);
                 }
             }

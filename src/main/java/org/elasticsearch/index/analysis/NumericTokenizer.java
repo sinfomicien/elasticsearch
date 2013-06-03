@@ -31,31 +31,26 @@ import java.io.Reader;
 public abstract class NumericTokenizer extends Tokenizer {
 
     private final NumericTokenStream numericTokenStream;
-
+    private final char[] buffer;
     protected final Object extra;
 
     protected NumericTokenizer(Reader reader, NumericTokenStream numericTokenStream, Object extra) throws IOException {
-        super(numericTokenStream);
-        this.numericTokenStream = numericTokenStream;
-        this.extra = extra;
-        reset(reader);
+        this(reader, numericTokenStream, new char[32], extra);
     }
 
     protected NumericTokenizer(Reader reader, NumericTokenStream numericTokenStream, char[] buffer, Object extra) throws IOException {
-        super(numericTokenStream);
+        super(reader);
         this.numericTokenStream = numericTokenStream;
         this.extra = extra;
-        reset(reader, buffer);
+        this.buffer = buffer;
     }
 
     @Override
-    public void reset(Reader input) throws IOException {
-        char[] buffer = new char[32];
-        reset(input, buffer);
+    public void reset() throws IOException {
+        reset(buffer);
     }
 
-    public void reset(Reader input, char[] buffer) throws IOException {
-        super.reset(input);
+    public void reset(char[] buffer) throws IOException {
         int len = input.read(buffer);
         String value = new String(buffer, 0, len);
         setValue(numericTokenStream, value);

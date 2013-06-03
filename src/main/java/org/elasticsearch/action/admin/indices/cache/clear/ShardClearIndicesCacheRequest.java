@@ -33,19 +33,22 @@ class ShardClearIndicesCacheRequest extends BroadcastShardOperationRequest {
     private boolean filterCache = false;
     private boolean fieldDataCache = false;
     private boolean idCache = false;
-    private boolean bloomCache = false;
+    private boolean recycler;
+
     private String[] fields = null;
+    private String[] filterKeys = null;
 
     ShardClearIndicesCacheRequest() {
     }
 
     public ShardClearIndicesCacheRequest(String index, int shardId, ClearIndicesCacheRequest request) {
-        super(index, shardId);
+        super(index, shardId, request);
         filterCache = request.filterCache();
         fieldDataCache = request.fieldDataCache();
         idCache = request.idCache();
-        bloomCache = request.bloomCache();
         fields = request.fields();
+        filterKeys = request.filterKeys();
+        recycler = request.recycler();
     }
 
     public boolean filterCache() {
@@ -59,13 +62,17 @@ class ShardClearIndicesCacheRequest extends BroadcastShardOperationRequest {
     public boolean idCache() {
         return this.idCache;
     }
-
-    public boolean bloomCache() {
-        return this.bloomCache;
+    
+    public boolean recycler() {
+        return this.recycler;
     }
 
     public String[] fields() {
         return this.fields;
+    }
+
+    public String[] filterKeys() {
+        return this.filterKeys;
     }
 
     public ShardClearIndicesCacheRequest waitForOperations(boolean waitForOperations) {
@@ -79,14 +86,9 @@ class ShardClearIndicesCacheRequest extends BroadcastShardOperationRequest {
         filterCache = in.readBoolean();
         fieldDataCache = in.readBoolean();
         idCache = in.readBoolean();
-        bloomCache = in.readBoolean();
-        int size = in.readVInt();
-        if (size > 0) {
-            fields = new String[size];
-            for (int i = 0; i < size; i++) {
-                fields[i] = in.readUTF();
-            }
-        }
+        recycler = in.readBoolean();
+        fields = in.readStringArray();
+        filterKeys = in.readStringArray();
     }
 
     @Override
@@ -95,14 +97,8 @@ class ShardClearIndicesCacheRequest extends BroadcastShardOperationRequest {
         out.writeBoolean(filterCache);
         out.writeBoolean(fieldDataCache);
         out.writeBoolean(idCache);
-        out.writeBoolean(bloomCache);
-        if (fields == null) {
-            out.writeVInt(0);
-        } else {
-            out.writeVInt(fields.length);
-            for (String field : fields) {
-                out.writeUTF(field);
-            }
-        }
+        out.writeBoolean(recycler);
+        out.writeStringArrayNullable(fields);
+        out.writeStringArrayNullable(filterKeys);
     }
 }
